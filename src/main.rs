@@ -1,0 +1,1721 @@
+//! BSDConqueror 0.12.0 — porte do original Python/GTK para Rust + egui/eframe.
+//!
+//! Arquitetura:
+//!   * `Backend`  — equivalente a `ScanmemBackend` (sessão scanmem persistente,
+//!                  leitura bloqueante até ao prompt, com timeouts).
+//!   * `worker_loop` — thread dedicada que é dona do `Backend`. É a única que
+//!                  bloqueia; a UI só envia pedidos (`Req`) e recebe respostas
+//!                  (`Resp`) por canais, por isso a janela nunca fica pendurada.
+//!   * `BSDConqueror` — a interface egui (equivalente à janela GTK).
+//!
+//! O editor de células (SingleMemoryEditor) está em `parse_value` + `commit_edit`.
+
+use eframe::egui::{self, RichText};
+use regex::Regex;
+use std::collections::{HashMap, HashSet};
+use std::io::{Read, Write};
+use std::path::PathBuf;
+use std::process::{Child, ChildStdin, ChildStdout, Command, Stdio};
+use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
+use std::sync::{Mutex, OnceLock};
+use std::thread::{self, JoinHandle};
+use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
+
+const APP_VERSION: &str = "0.12.0";
+const INT32_MIN: i64 = -2_147_483_648;
+const UINT32_MAX: i64 = 4_294_967_295;
+const LIST_LIMIT: usize = 20;
+
+// ───────────────────────────── Logging ─────────────────────────────
+// Equivalente ao logging.basicConfig(filename="bsdconqueror-debug.log").
+
+static LOG_FILE: OnceLock<Mutex<std::fs::File>> = OnceLock::new();
+
+fn init_log() {
+    let dir = std::env::current_exe()
+        .ok()
+        .and_then(|p| p.parent().map(|d| d.to_path_buf()))
+        .unwrap_or_else(|| PathBuf::from("."));
+    if let Ok(f) = std::fs::OpenOptions::new()
+        .create(true)
+        .append(true)
+        .open(dir.join("bsdconqueror-debug.log"))
+    {
+        let _ = LOG_FILE.set(Mutex::new(f));
+    }
+}
+
+fn log_line(level: &str, msg: &str) {
+    if let Some(m) = LOG_FILE.get() {
+        if let Ok(mut f) = m.lock() {
+            let secs = SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .map(|d| d.as_secs_f64())
+                .unwrap_or(0.0);
+            let _ = writeln!(f, "{:.3} {} {}", secs, level, msg);
+        }
+    }
+}
+
+macro_rules! log_info  { ($($a:tt)*) => { log_line("INFO",    &format!($($a)*)) }; }
+macro_rules! log_debug { ($($a:tt)*) => { log_line("DEBUG",   &format!($($a)*)) }; }
+macro_rules! log_warn  { ($($a:tt)*) => { log_line("WARNING", &format!($($a)*)) }; }
+macro_rules! log_error { ($($a:tt)*) => { log_line("ERROR",   &format!($($a)*)) }; }
+
+// ───────────────────────────── Utilitários ─────────────────────────────
+
+fn tail(s: &str, n: usize) -> String {
+    let chars: Vec<char> = s.chars().collect();
+    let start = chars.len().saturating_sub(n);
+    chars[start..].iter().collect()
+}
+
+fn prompt_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?:^|\n)\s*(?:\d+)?\s*>\s*$").unwrap())
+}
+
+fn match_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| {
+        Regex::new(r"^\[\s*(\d+)\]\s+([0-9a-fA-F]+),.*?,\s*([^,]+),\s*([^,]+),\s*\[([^\]]*)\]")
+            .unwrap()
+    })
+}
+
+fn count_re() -> &'static Regex {
+    static RE: OnceLock<Regex> = OnceLock::new();
+    RE.get_or_init(|| Regex::new(r"(?i)(?:currently have|have)\s+(\d+)\s+matches?").unwrap())
+}
+
+/// Último "N matches" do scanmem.
+fn match_count(output: &str) -> Option<usize> {
+    count_re()
+        .captures_iter(output)
+        .last()
+        .and_then(|c| c[1].parse().ok())
+}
+
+#[derive(Clone, Debug)]
+struct ScanMatch {
+    id: u64,
+    address: u64,
+    region: String,
+    value: String,
+    types: String,
+}
+
+/// Equivalente a `parse_scanmem_matches`.
+fn parse_matches(output: &str) -> Vec<ScanMatch> {
+    let mut v = Vec::new();
+    for line in output.lines() {
+        if let Some(c) = match_re().captures(line.trim()) {
+            if let Ok(address) = u64::from_str_radix(&c[2], 16) {
+                v.push(ScanMatch {
+                    id: c[1].parse().unwrap_or(0),
+                    address,
+                    region: c[3].trim().to_string(),
+                    value: c[4].trim().to_string(),
+                    types: c[5].trim().to_string(),
+                });
+            }
+        }
+    }
+    v
+}
+
+fn digits(s: &str, radix: u32) -> Option<i64> {
+    if s.is_empty() || s.starts_with(|c| c == '+' || c == '-') {
+        return None;
+    }
+    i64::from_str_radix(s, radix).ok()
+}
+
+/// `int(raw, 0)` do Python, com fallback para `int(raw, 10)`.
+fn parse_int(raw: &str) -> Option<i64> {
+    let s = raw.trim();
+    let (neg, body) = if let Some(r) = s.strip_prefix('-') {
+        (true, r)
+    } else {
+        (false, s.strip_prefix('+').unwrap_or(s))
+    };
+    let lower = body.to_ascii_lowercase();
+    let base0 = if let Some(h) = lower.strip_prefix("0x") {
+        digits(h, 16)
+    } else if let Some(b) = lower.strip_prefix("0b") {
+        digits(b, 2)
+    } else if let Some(o) = lower.strip_prefix("0o") {
+        digits(o, 8)
+    } else if lower.len() > 1 && lower.starts_with('0') {
+        None // base 0 rejeita zeros à esquerda; cai no fallback decimal
+    } else {
+        digits(&lower, 10)
+    };
+    match base0 {
+        Some(v) => Some(if neg { -v } else { v }),
+        None => s.parse::<i64>().ok(),
+    }
+}
+
+enum ValErr {
+    Invalid,
+    Range,
+}
+
+fn parse_value(raw: &str) -> Result<i64, ValErr> {
+    let v = parse_int(raw).ok_or(ValErr::Invalid)?;
+    if !(INT32_MIN..=UINT32_MAX).contains(&v) {
+        return Err(ValErr::Range);
+    }
+    Ok(v)
+}
+
+fn find_scanmem() -> Option<String> {
+    if let Ok(p) = std::env::var("SCANMEM_PATH") {
+        if !p.is_empty() {
+            return Some(p);
+        }
+    }
+    let path = std::env::var_os("PATH")?;
+    for dir in std::env::split_paths(&path) {
+        let c = dir.join("scanmem");
+        if c.is_file() {
+            return Some(c.to_string_lossy().into_owned());
+        }
+    }
+    None
+}
+
+// ───────────────────────────── Backend scanmem ─────────────────────────────
+
+struct Session {
+    child: Child,
+    stdin: ChildStdin,
+    rx: Receiver<Vec<u8>>,
+    pid: i32,
+}
+
+fn spawn_reader(mut out: ChildStdout, tx: Sender<Vec<u8>>) {
+    thread::spawn(move || {
+        let mut buf = [0u8; 4096];
+        loop {
+            match out.read(&mut buf) {
+                Ok(0) | Err(_) => break,
+                Ok(n) => {
+                    if tx.send(buf[..n].to_vec()).is_err() {
+                        break;
+                    }
+                }
+            }
+        }
+    });
+}
+
+impl Session {
+    fn exited(&mut self) -> bool {
+        !matches!(self.child.try_wait(), Ok(None))
+    }
+
+    /// Equivalente a `_read_prompt`: lê até o prompt aparecer (ou timeout).
+    fn read_prompt(&mut self, timeout_s: u64) -> Result<(String, bool), String> {
+        let deadline = Instant::now() + Duration::from_secs(timeout_s);
+        let mut data: Vec<u8> = Vec::new();
+        loop {
+            let now = Instant::now();
+            if now >= deadline {
+                return Err(format!(
+                    "Timeout à espera do prompt scanmem. Saída: {}",
+                    tail(&String::from_utf8_lossy(&data), 1200)
+                ));
+            }
+            let wait = (deadline - now).min(Duration::from_millis(250));
+            match self.rx.recv_timeout(wait) {
+                Ok(chunk) => {
+                    data.extend(chunk);
+                    while let Ok(c) = self.rx.try_recv() {
+                        data.extend(c);
+                    }
+                    let text = String::from_utf8_lossy(&data).into_owned();
+                    if prompt_re().is_match(text.trim_end()) {
+                        return Ok((text, true));
+                    }
+                }
+                Err(RecvTimeoutError::Timeout) => {
+                    if self.exited() {
+                        while let Ok(c) = self.rx.try_recv() {
+                            data.extend(c);
+                        }
+                        return Ok((String::from_utf8_lossy(&data).into_owned(), false));
+                    }
+                }
+                Err(RecvTimeoutError::Disconnected) => {
+                    return Ok((String::from_utf8_lossy(&data).into_owned(), false));
+                }
+            }
+        }
+    }
+
+    fn shutdown(&mut self) {
+        let _ = writeln!(self.stdin, "exit");
+        let _ = self.stdin.flush();
+        let end = Instant::now() + Duration::from_secs(2);
+        while Instant::now() < end {
+            if let Ok(Some(_)) = self.child.try_wait() {
+                return;
+            }
+            thread::sleep(Duration::from_millis(50));
+        }
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+impl Drop for Session {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+struct Backend {
+    exe: String,
+    session: Option<Session>,
+}
+
+impl Backend {
+    fn alive(&mut self) -> bool {
+        match self.session.as_mut() {
+            Some(s) => !s.exited(),
+            None => false,
+        }
+    }
+
+    fn close(&mut self) {
+        if let Some(mut s) = self.session.take() {
+            s.shutdown();
+        }
+    }
+
+    fn start(&mut self, pid: i32) -> Result<(), String> {
+        self.close();
+        // `sh -c 'exec scanmem 2>&1'` funde stderr em stdout (como no Python:
+        // stderr=subprocess.STDOUT) e mantém a ordem das mensagens.
+        let mut child = Command::new("sh")
+            .arg("-c")
+            .arg("exec \"$0\" 2>&1")
+            .arg(&self.exe)
+            .stdin(Stdio::piped())
+            .stdout(Stdio::piped())
+            .stderr(Stdio::null())
+            .env("PAGER", "cat")
+            .spawn()
+            .map_err(|e| format!("Falha ao iniciar scanmem: {}", e))?;
+        let stdin = child.stdin.take().ok_or("scanmem sem stdin")?;
+        let stdout = child.stdout.take().ok_or("scanmem sem stdout")?;
+        let (tx, rx) = mpsc::channel();
+        spawn_reader(stdout, tx);
+        let mut s = Session { child, stdin, rx, pid: 0 };
+
+        // Se algo falhar daqui até ao fim, `s` é largado e o Drop mata o processo.
+        let (out, ok) = s.read_prompt(15)?;
+        log_debug!("scanmem startup (prompt={}): {}", ok, tail(&out, 1200));
+        if !ok {
+            return Err(if out.trim().is_empty() {
+                "scanmem não apresentou prompt inicial".to_string()
+            } else {
+                tail(&out, 700)
+            });
+        }
+        s.pid = pid;
+        self.session = Some(s);
+
+        let out = match self.command(&format!("pid {}", pid), 20) {
+            Ok(o) => o,
+            Err(e) => {
+                self.close();
+                return Err(e);
+            }
+        };
+        log_debug!("pid command: {}", tail(&out, 1200));
+        let low = out.to_lowercase();
+        if low.contains("error:") || low.contains("failed") {
+            self.close();
+            return Err(if out.trim().is_empty() {
+                format!("Não foi possível associar PID {}", pid)
+            } else {
+                tail(&out, 700)
+            });
+        }
+        Ok(())
+    }
+
+    /// Equivalente a `_command`.
+    fn command(&mut self, cmd: &str, timeout_s: u64) -> Result<String, String> {
+        let s = match self.session.as_mut() {
+            Some(s) => s,
+            None => return Err("sessão scanmem terminou".into()),
+        };
+        if s.exited() {
+            return Err("sessão scanmem terminou".into());
+        }
+        log_debug!("scanmem > {}", cmd);
+        while s.rx.try_recv().is_ok() {} // descarta lixo antigo
+        writeln!(s.stdin, "{}", cmd).map_err(|e| format!("Erro ao enviar comando: {}", e))?;
+        s.stdin
+            .flush()
+            .map_err(|e| format!("Erro no flush: {}", e))?;
+        let (out, ok) = s.read_prompt(timeout_s)?;
+        log_debug!("scanmem output (prompt={}): {}", ok, tail(&out, 4000));
+        if !ok {
+            return Err(if out.trim().is_empty() {
+                "scanmem terminou antes do prompt".to_string()
+            } else {
+                tail(&out, 700)
+            });
+        }
+        Ok(out)
+    }
+
+    /// Devolve (saída completa, total reportado pelo scanmem).
+    fn search(&mut self, pid: i32, value: i64, first: bool) -> Result<(String, Option<usize>), String> {
+        let wrong_pid = self.session.as_ref().map(|s| s.pid) != Some(pid);
+        if first || !self.alive() || wrong_pid {
+            self.start(pid)?;
+        }
+        let mut output = self.command(&value.to_string(), 90)?;
+        let count = match_count(&output);
+        if let Some(c) = count {
+            if c > LIST_LIMIT {
+                log_info!("{} matches; suppressing address list until <= {}", c, LIST_LIMIT);
+                return Ok((output, count));
+            }
+        }
+        let list = self.command(&format!("list {}", LIST_LIMIT), 90)?;
+        output.push('\n');
+        output.push_str(&list);
+        Ok((output, count))
+    }
+
+    fn write(&mut self, pid: i32, vtype: &str, address: &str, value: i64) -> Result<String, String> {
+        let wrong_pid = self.session.as_ref().map(|s| s.pid) != Some(pid);
+        if !self.alive() || wrong_pid {
+            self.start(pid)?;
+        }
+        // scanmem 0.17: write <value_type> <address> <value>
+        let out = self.command(&format!("write {} {} {}", vtype, address, value), 20)?;
+        log_debug!("write address={} type={} value={}: {}", address, vtype, value, tail(&out, 1000));
+        Ok(out)
+    }
+}
+
+// ───────────────────────────── Worker ─────────────────────────────
+
+struct WriteItem {
+    address: String,
+    value: i64,
+    vtype: String,
+}
+
+enum WriteKind {
+    Edit { address: String, was_locked: bool },
+    /// Mesmo valor para várias linhas selecionadas.
+    Many { rows: Vec<(String, bool)> },
+    Lock,
+}
+
+enum Req {
+    Search { gid: u64, pid: i32, value: i64, first: bool },
+    Write { gid: u64, kind: WriteKind, pid: i32, items: Vec<WriteItem> },
+    Close,
+    Shutdown,
+}
+
+struct SearchOut {
+    matches: Vec<ScanMatch>,
+    total: usize,
+}
+
+enum WriteRes {
+    Ok,
+    /// O scanmem respondeu com "error:" / "failed".
+    Failed(String),
+    /// Falha de sessão (timeout, processo terminou, etc.).
+    Exception(String),
+}
+
+enum Resp {
+    Search {
+        gid: u64,
+        pid: i32,
+        value: i64,
+        first: bool,
+        result: Result<SearchOut, String>,
+    },
+    Write {
+        gid: u64,
+        kind: WriteKind,
+        results: Vec<(String, i64, WriteRes)>,
+    },
+}
+
+fn worker_loop(exe: String, rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context) {
+    let mut be = Backend { exe, session: None };
+    while let Ok(req) = rx.recv() {
+        match req {
+            Req::Shutdown => break,
+            Req::Close => be.close(),
+            Req::Search { gid, pid, value, first } => {
+                let result = match be.search(pid, value, first) {
+                    Ok((out, count)) => {
+                        let matches = parse_matches(&out);
+                        let total = count.unwrap_or(matches.len());
+                        if total == 0 {
+                            be.close();
+                        }
+                        Ok(SearchOut { matches, total })
+                    }
+                    Err(e) => {
+                        log_error!("Falha na pesquisa: {}", e);
+                        be.close();
+                        Err(e)
+                    }
+                };
+                let _ = tx.send(Resp::Search { gid, pid, value, first, result });
+            }
+            Req::Write { gid, kind, pid, items } => {
+                let mut results: Vec<(String, i64, WriteRes)> = Vec::new();
+                let mut failed_msg: Option<String> = None;
+                for it in items {
+                    if let Some(msg) = &failed_msg {
+                        results.push((it.address, it.value, WriteRes::Exception(msg.clone())));
+                        continue;
+                    }
+                    let r = match be.write(pid, &it.vtype, &it.address, it.value) {
+                        Ok(out) => {
+                            let low = out.to_lowercase();
+                            if low.contains("error:") || low.contains("failed") {
+                                log_warn!("Write failed at {}: {}", it.address, tail(&out, 500));
+                                WriteRes::Failed(tail(&out, 500))
+                            } else {
+                                log_info!(
+                                    "Write address={} type={} value={}",
+                                    it.address, it.vtype, it.value
+                                );
+                                WriteRes::Ok
+                            }
+                        }
+                        Err(e) => {
+                            log_error!("Write exception at {}: {}", it.address, e);
+                            be.close();
+                            failed_msg = Some(e.clone());
+                            WriteRes::Exception(e)
+                        }
+                    };
+                    results.push((it.address, it.value, r));
+                }
+                let _ = tx.send(Resp::Write { gid, kind, results });
+            }
+        }
+        ctx.request_repaint();
+    }
+    be.close();
+}
+
+// ───────────────────────────── Interface ─────────────────────────────
+
+#[derive(Clone, Debug)]
+struct ProcessRow {
+    pid: i32,
+    user: String,
+    command: String,
+}
+
+#[derive(Clone, Debug)]
+struct ResultRow {
+    locked: bool,
+    description: String,
+    address: String,
+    types: String,
+    value: String,
+}
+
+/// `ps -axo pid,user,comm` -> split(None, 2) como no Python.
+fn parse_ps_line(line: &str) -> Option<ProcessRow> {
+    let line = line.trim();
+    let mut it = line.splitn(2, char::is_whitespace);
+    let pid_s = it.next()?;
+    let rest = it.next()?.trim_start();
+    let mut it2 = rest.splitn(2, char::is_whitespace);
+    let user = it2.next()?;
+    let command = it2.next()?.trim_start();
+    if command.is_empty() || pid_s.eq_ignore_ascii_case("pid") {
+        return None;
+    }
+    Some(ProcessRow {
+        pid: pid_s.parse().ok()?,
+        user: user.to_string(),
+        command: command.to_string(),
+    })
+}
+
+/// Lógica de seleção (clique, Ctrl, Shift) partilhada pelas duas listas.
+fn apply_click(sel: &mut HashSet<usize>, anchor: &mut Option<usize>, i: usize, ctrl: bool, shift: bool) {
+    if shift {
+        if let Some(a) = *anchor {
+            if !ctrl {
+                sel.clear();
+            }
+            for k in a.min(i)..=a.max(i) {
+                sel.insert(k);
+            }
+            return;
+        }
+    }
+    if ctrl {
+        if !sel.remove(&i) {
+            sel.insert(i);
+        }
+    } else {
+        sel.clear();
+        sel.insert(i);
+    }
+    *anchor = Some(i);
+}
+
+/// Ícone embebido, com tamanho proporcional à letra atual.
+fn ico(ui: &egui::Ui, src: egui::ImageSource<'static>) -> egui::Image<'static> {
+    let sz = ui.text_style_height(&egui::TextStyle::Body) * 1.2;
+    egui::Image::new(src).fit_to_exact_size(egui::vec2(sz, sz))
+}
+
+/// Desenha uma linha de tabela com fundo completo (seleção, hover, zebra).
+/// A última coluna ocupa o espaço restante. Devolve a resposta da linha e o
+/// retângulo de cada coluna (para colocar widgets, p.ex. checkbox/edição).
+fn draw_row(
+    ui: &mut egui::Ui,
+    widths: &[f32],
+    texts: &[&str],
+    mono: &[bool],
+    selected: bool,
+    odd: bool,
+    header: bool,
+) -> (egui::Response, Vec<egui::Rect>) {
+    let total = ui.available_width();
+    let row_h = ui.text_style_height(&egui::TextStyle::Body) + 8.0;
+    let (rect, resp) = ui.allocate_exact_size(egui::vec2(total, row_h), egui::Sense::click());
+    let mut rects = Vec::with_capacity(widths.len());
+    let mut x = rect.left();
+    for (i, w) in widths.iter().enumerate() {
+        let cw = if i + 1 == widths.len() { (rect.right() - x).max(60.0) } else { *w };
+        rects.push(egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(cw, row_h)));
+        x += cw;
+    }
+    if ui.is_rect_visible(rect) {
+        let v = ui.visuals();
+        let bg = if selected {
+            v.selection.bg_fill
+        } else if header {
+            egui::Color32::from_black_alpha(22)
+        } else if resp.hovered() {
+            egui::Color32::from_black_alpha(14)
+        } else if odd {
+            v.faint_bg_color
+        } else {
+            egui::Color32::TRANSPARENT
+        };
+        let color = if header { v.strong_text_color() } else { v.text_color() };
+        let painter = ui.painter();
+        painter.rect_filled(rect, 2.0, bg);
+        for (i, cr) in rects.iter().enumerate() {
+            let text = texts.get(i).copied().unwrap_or("");
+            if text.is_empty() {
+                continue;
+            }
+            let font = if mono.get(i).copied().unwrap_or(false) {
+                egui::TextStyle::Monospace.resolve(ui.style())
+            } else {
+                egui::TextStyle::Body.resolve(ui.style())
+            };
+            painter.with_clip_rect(cr.shrink2(egui::vec2(2.0, 0.0))).text(
+                cr.left_center() + egui::vec2(8.0, 0.0),
+                egui::Align2::LEFT_CENTER,
+                text,
+                font,
+                color,
+            );
+        }
+    }
+    (resp, rects)
+}
+
+struct BSDConqueror {
+    // processos
+    processes: Vec<ProcessRow>,
+    process_filter: String,
+    sort_col: usize,
+    sort_asc: bool,
+    selected_pid: Option<i32>,
+    selected_text: String,
+
+    // backend
+    scanmem_path: Option<String>,
+    req_tx: Option<Sender<Req>>,
+    resp_rx: Receiver<Resp>,
+    worker: Option<JoinHandle<()>>,
+    generation: u64,
+    in_flight: usize,
+    searching: bool,
+
+    // estado da pesquisa
+    scan_has_results: bool,
+    scan_pid: Option<i32>,
+    /// endereço ("0x...") -> (valor, tipo scanmem)
+    locked: HashMap<String, (i64, String)>,
+    last_lock_tick: Instant,
+
+    // controlos
+    value_input: String,
+
+    // resultados
+    found: usize,
+    /// Lista "Found": resultados da pesquisa (só leitura/seleção).
+    found_rows: Vec<ResultRow>,
+    found_selected: HashSet<usize>,
+    found_anchor: Option<usize>,
+    result_rows: Vec<ResultRow>,
+    selected_rows: HashSet<usize>,
+    cursor: Option<usize>,
+    anchor: Option<usize>,
+    /// (linha, texto, precisa de foco)
+    editing: Option<(usize, String, bool)>,
+
+    status: String,
+
+    // tamanho da letra (Ctrl + roda do rato)
+    base_sizes: Vec<(egui::TextStyle, f32)>,
+    font_delta: f32,
+    scroll_acc: f32,
+}
+
+impl BSDConqueror {
+    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+        cc.egui_ctx.set_visuals(egui::Visuals::light());
+        egui_extras::install_image_loaders(&cc.egui_ctx);
+        let base_sizes: Vec<(egui::TextStyle, f32)> = cc
+            .egui_ctx
+            .style()
+            .text_styles
+            .iter()
+            .map(|(k, v)| (k.clone(), v.size))
+            .collect();
+        let scanmem_path = find_scanmem();
+        let (resp_tx, resp_rx) = mpsc::channel();
+        let (req_tx, worker) = match &scanmem_path {
+            Some(p) => {
+                let (tx, rx) = mpsc::channel();
+                let exe = p.clone();
+                let ctx = cc.egui_ctx.clone();
+                let h = thread::spawn(move || worker_loop(exe, rx, resp_tx, ctx));
+                (Some(tx), Some(h))
+            }
+            None => (None, None),
+        };
+
+        let mut app = Self {
+            processes: Vec::new(),
+            process_filter: String::new(),
+            sort_col: 2,
+            sort_asc: true,
+            selected_pid: None,
+            selected_text: "No process selected".into(),
+            scanmem_path,
+            req_tx,
+            resp_rx,
+            worker,
+            generation: 0,
+            in_flight: 0,
+            searching: false,
+            scan_has_results: false,
+            scan_pid: None,
+            locked: HashMap::new(),
+            last_lock_tick: Instant::now(),
+            value_input: String::new(),
+            found: 0,
+            found_rows: Vec::new(),
+            found_selected: HashSet::new(),
+            found_anchor: None,
+            result_rows: Vec::new(),
+            selected_rows: HashSet::new(),
+            cursor: None,
+            anchor: None,
+            editing: None,
+            base_sizes,
+            font_delta: 2.0,
+            scroll_acc: 0.0,
+            status: "Ready — Search, refine with Next Search, and lock results when 20 or fewer remain."
+                .into(),
+        };
+        app.apply_font(&cc.egui_ctx);
+        app.refresh_processes();
+        app
+    }
+
+    // ── tamanho da letra ──
+
+    fn apply_font(&self, ctx: &egui::Context) {
+        ctx.style_mut(|st| {
+            for (ts, base) in &self.base_sizes {
+                if let Some(f) = st.text_styles.get_mut(ts) {
+                    f.size = (base + self.font_delta).max(6.0);
+                }
+            }
+        });
+    }
+
+    /// Fator em relação ao tamanho de letra por omissão do egui (12.5).
+    fn ui_scale(&self) -> f32 {
+        ((12.5 + self.font_delta) / 12.5).max(0.5)
+    }
+
+    /// Ctrl + roda do rato: aumenta/diminui a letra (1 pt por "clique").
+    fn handle_font_zoom(&mut self, ctx: &egui::Context) {
+        let (ctrl, scroll) = ctx.input(|i| (i.modifiers.command, i.raw_scroll_delta.y));
+        if !ctrl {
+            self.scroll_acc = 0.0;
+            return;
+        }
+        if scroll == 0.0 {
+            return;
+        }
+        self.scroll_acc += scroll;
+        let before = self.font_delta;
+        while self.scroll_acc >= 40.0 {
+            self.font_delta += 1.0;
+            self.scroll_acc -= 40.0;
+        }
+        while self.scroll_acc <= -40.0 {
+            self.font_delta -= 1.0;
+            self.scroll_acc += 40.0;
+        }
+        self.font_delta = self.font_delta.clamp(-4.0, 14.0);
+        if self.font_delta != before {
+            self.apply_font(ctx);
+            self.status = format!("Tamanho da letra: {:.1} pt", 12.5 + self.font_delta);
+        }
+    }
+
+    // ── envio de pedidos ──
+
+    fn send_job(&mut self, req: Req) {
+        if let Some(tx) = &self.req_tx {
+            if tx.send(req).is_ok() {
+                self.in_flight += 1;
+            }
+        }
+    }
+
+    /// Fecha a sessão scanmem e invalida respostas pendentes.
+    fn close_backend(&mut self) {
+        self.generation += 1;
+        self.searching = false;
+        if let Some(tx) = &self.req_tx {
+            let _ = tx.send(Req::Close);
+        }
+    }
+
+    // ── processos ──
+
+    fn sort_processes(&mut self) {
+        match self.sort_col {
+            0 => self.processes.sort_by_key(|p| p.pid),
+            1 => self.processes.sort_by(|a, b| {
+                a.user.to_lowercase().cmp(&b.user.to_lowercase()).then(a.pid.cmp(&b.pid))
+            }),
+            _ => self.processes.sort_by(|a, b| {
+                a.command.to_lowercase().cmp(&b.command.to_lowercase()).then(a.pid.cmp(&b.pid))
+            }),
+        }
+        if !self.sort_asc {
+            self.processes.reverse();
+        }
+    }
+
+    fn refresh_processes(&mut self) {
+        let output = match Command::new("ps").args(["-axo", "pid,user,comm"]).output() {
+            Ok(o) => o,
+            Err(e) => {
+                self.status = format!("Could not list processes: {}", e);
+                return;
+            }
+        };
+        let stdout = String::from_utf8_lossy(&output.stdout);
+        self.processes = stdout.lines().filter_map(parse_ps_line).collect();
+        self.sort_processes();
+        if let Some(pid) = self.selected_pid {
+            if !self.processes.iter().any(|p| p.pid == pid) {
+                self.selected_pid = None;
+                self.selected_text = "No process selected".into();
+            }
+        }
+        self.status = format!("{} processes listed", self.processes.len());
+    }
+
+    fn on_process_selected(&mut self, p: &ProcessRow) {
+        // Outro processo: endereços, locks e pesquisa anteriores deixam de fazer sentido.
+        self.clear_locks(false);
+        self.close_backend();
+        self.scan_has_results = false;
+        self.scan_pid = None;
+        self.clear_found_view();
+        self.found = 0;
+        self.clear_work_list();
+        self.selected_pid = Some(p.pid);
+        self.selected_text = format!(
+            "Selected: {}  |  PID: {}  |  User: {}",
+            p.command, p.pid, p.user
+        );
+        self.status = format!(
+            "PID {} selected. Initial scan via scanmem is experimental.",
+            p.pid
+        );
+    }
+
+    // ── pesquisa ──
+
+    fn on_search(&mut self) {
+        let Some(pid) = self.selected_pid else {
+            self.status = "Select a process before starting a search.".into();
+            return;
+        };
+        if self.scanmem_path.is_none() || self.req_tx.is_none() {
+            self.status = "scanmem not found. Install sysutils/scanmem first.".into();
+            return;
+        }
+        let raw = self.value_input.trim().to_string();
+        if raw.is_empty() {
+            self.status = "Enter an integer value to search.".into();
+            return;
+        }
+        let value = match parse_value(&raw) {
+            Ok(v) => v,
+            Err(ValErr::Invalid) => {
+                self.status = "Invalid integer. Use decimal or 0x-prefixed hexadecimal.".into();
+                return;
+            }
+            Err(ValErr::Range) => {
+                self.status = "Value is outside the supported 32-bit integer range.".into();
+                return;
+            }
+        };
+        let first = !(self.scan_has_results && self.scan_pid == Some(pid));
+        let mode = if first { "Search" } else { "Next Search" };
+        self.searching = true;
+        self.status = format!("{}: PID {}, value {}…", mode, pid, value);
+        log_info!("button={} pid={} value={}", mode, pid, value);
+        if first {
+            self.clear_found_view();
+        }
+        let gid = self.generation;
+        self.send_job(Req::Search { gid, pid, value, first });
+    }
+
+    /// Limpa a lista "Found" (resultados da pesquisa).
+    fn clear_found_view(&mut self) {
+        self.found_rows.clear();
+        self.found_selected.clear();
+        self.found_anchor = None;
+    }
+
+    /// Limpa a lista de baixo (endereços escolhidos para fixar/alterar).
+    fn clear_work_list(&mut self) {
+        self.result_rows.clear();
+        self.selected_rows.clear();
+        self.cursor = None;
+        self.anchor = None;
+        self.editing = None;
+    }
+
+    fn finish_search(&mut self, pid: i32, value: i64, first: bool, result: Result<SearchOut, String>) {
+        let mode = if first { "Search" } else { "Next Search" };
+        match result {
+            Ok(out) => {
+                let total = out.total;
+                self.clear_found_view();
+                // Só preenche as grelhas com <= 20 resultados (como no original).
+                if total <= LIST_LIMIT {
+                    for m in out.matches.iter().take(LIST_LIMIT) {
+                        self.found_rows.push(ResultRow {
+                            locked: false,
+                            description: format!("Match {} ({})", m.id, m.region),
+                            address: format!("0x{:x}", m.address),
+                            types: m.types.clone(),
+                            value: m.value.clone(),
+                        });
+                    }
+                }
+                self.found = total;
+                self.scan_has_results = total > 0;
+                self.scan_pid = if total > 0 { Some(pid) } else { None };
+                self.status = if total > LIST_LIMIT {
+                    format!(
+                        "{}: {} resultados. A lista está oculta para evitar sobrecarregar a grelha; altera o valor e usa Next Search até restarem 20 ou menos.",
+                        mode, total
+                    )
+                } else if total > 0 {
+                    format!(
+                        "{} encontrou {} resultados para {} no PID {}; a mostrar {}. Podes continuar com Next Search.",
+                        mode, total, value, pid, total.min(out.matches.len())
+                    )
+                } else {
+                    "Não foram encontrados resultados. Consulta bsdconqueror-debug.log.".into()
+                };
+            }
+            Err(e) => {
+                self.status = format!("Erro scanmem: {}. Consulta bsdconqueror-debug.log.", e);
+                self.scan_has_results = false;
+                self.scan_pid = None;
+            }
+        }
+    }
+
+    // ── escrita (célula / lock) ──
+
+    /// Edição da coluna Value. Se a linha editada pertence a uma multisseleção,
+    /// o mesmo valor é atribuído a todas as linhas selecionadas.
+    fn commit_edit(&mut self, row: usize, text: String) {
+        let Some(pid) = self.selected_pid else {
+            self.status = "Seleciona um processo antes de editar valores.".into();
+            return;
+        };
+        let Some(r) = self.result_rows.get(row) else { return };
+        let address = r.address.clone();
+        let was_locked = r.locked;
+        if self.req_tx.is_none() {
+            self.status = format!("Não foi possível alterar {}: scanmem backend indisponível", address);
+            return;
+        }
+        let value = match parse_value(&text) {
+            Ok(v) => v,
+            Err(ValErr::Invalid) => {
+                self.status = format!("Não foi possível alterar {}: valor inteiro inválido", address);
+                return;
+            }
+            Err(ValErr::Range) => {
+                self.status = format!(
+                    "Não foi possível alterar {}: O valor tem de estar dentro do intervalo inteiro de 32 bits.",
+                    address
+                );
+                return;
+            }
+        };
+        let gid = self.generation;
+        let multi = self.selected_rows.contains(&row) && self.selected_rows.len() > 1;
+        if multi {
+            let mut idx: Vec<usize> = self
+                .selected_rows
+                .iter()
+                .copied()
+                .filter(|i| *i < self.result_rows.len())
+                .collect();
+            idx.sort_unstable();
+            let rows: Vec<(String, bool)> = idx
+                .iter()
+                .map(|&i| (self.result_rows[i].address.clone(), self.result_rows[i].locked))
+                .collect();
+            let items: Vec<WriteItem> = rows
+                .iter()
+                .map(|(a, _)| WriteItem { address: a.clone(), value, vtype: "int32".into() })
+                .collect();
+            self.status = format!("A escrever {} em {} endereço(s)…", value, items.len());
+            self.send_job(Req::Write { gid, kind: WriteKind::Many { rows }, pid, items });
+        } else {
+            self.send_job(Req::Write {
+                gid,
+                kind: WriteKind::Edit { address: address.clone(), was_locked },
+                pid,
+                items: vec![WriteItem { address, value, vtype: "int32".into() }],
+            });
+        }
+    }
+
+    fn finish_write(&mut self, kind: WriteKind, results: Vec<(String, i64, WriteRes)>) {
+        match kind {
+            WriteKind::Edit { address, was_locked } => {
+                let Some((_, value, res)) = results.into_iter().next() else { return };
+                match res {
+                    WriteRes::Ok => {
+                        log_info!("CELL EDIT address={} type=int32 value={}", address, value);
+                        if let Some(r) = self.result_rows.iter_mut().find(|r| r.address == address) {
+                            r.value = value.to_string();
+                        }
+                        if was_locked {
+                            self.locked.insert(address.clone(), (value, "int32".into()));
+                        }
+                        self.status = format!("Valor de {} alterado para {}.", address, value);
+                    }
+                    WriteRes::Failed(m) | WriteRes::Exception(m) => {
+                        let m = if m.trim().is_empty() { "scanmem não confirmou a escrita".to_string() } else { m };
+                        log_error!("Single-cell write failed address={}: {}", address, m);
+                        self.status = format!("Não foi possível alterar {}: {}", address, m);
+                    }
+                }
+            }
+            WriteKind::Many { rows } => {
+                let total = results.len();
+                let value = results.first().map(|r| r.1).unwrap_or(0);
+                let mut written = 0usize;
+                let mut failures = 0usize;
+                for (addr, val, res) in &results {
+                    match res {
+                        WriteRes::Ok => {
+                            written += 1;
+                            if let Some(row) = self.result_rows.iter_mut().find(|row| row.address == *addr) {
+                                row.value = val.to_string();
+                            }
+                            if rows.iter().any(|(a, l)| a == addr && *l) {
+                                self.locked.insert(addr.clone(), (*val, "int32".into()));
+                            }
+                        }
+                        _ => failures += 1,
+                    }
+                }
+                log_info!(
+                    "MULTI WRITE value={} selected={} written={} failures={}",
+                    value, total, written, failures
+                );
+                self.status = if failures > 0 {
+                    format!(
+                        "Valor {}: {}/{} escritos; {} falharam. Consulta bsdconqueror-debug.log.",
+                        value, written, total, failures
+                    )
+                } else {
+                    format!("Valor {} escrito em {} endereço(s).", value, written)
+                };
+            }
+            WriteKind::Lock => {
+                let mut exc: Option<String> = None;
+                for (addr, _, res) in &results {
+                    match res {
+                        WriteRes::Failed(m) => log_warn!("LOCK write warning address={}: {}", addr, m),
+                        WriteRes::Exception(e) => exc = Some(e.clone()),
+                        WriteRes::Ok => {}
+                    }
+                }
+                if let Some(e) = exc {
+                    log_error!("Lock write failed: {}", e);
+                    self.status = format!("Falha no lock: {}. Consulta bsdconqueror-debug.log.", e);
+                    // Para de repetir locks obsoletos após falha do backend.
+                    self.clear_locks(false);
+                }
+            }
+        }
+    }
+
+    fn handle_responses(&mut self) {
+        while let Ok(resp) = self.resp_rx.try_recv() {
+            self.in_flight = self.in_flight.saturating_sub(1);
+            match resp {
+                Resp::Search { gid, pid, value, first, result } => {
+                    if gid != self.generation {
+                        continue;
+                    }
+                    self.searching = false;
+                    self.finish_search(pid, value, first, result);
+                }
+                Resp::Write { gid, kind, results } => {
+                    if gid != self.generation {
+                        continue;
+                    }
+                    self.finish_write(kind, results);
+                }
+            }
+        }
+    }
+
+    // ── locks ──
+
+    /// Equivalente ao timeout de 250 ms: nunca bloqueia, só enfileira.
+    fn tick_locks(&mut self) {
+        if self.locked.is_empty() || self.req_tx.is_none() || self.in_flight > 0 {
+            return;
+        }
+        let Some(pid) = self.selected_pid else { return };
+        if self.last_lock_tick.elapsed() < Duration::from_millis(250) {
+            return;
+        }
+        self.last_lock_tick = Instant::now();
+        let items: Vec<WriteItem> = self
+            .locked
+            .iter()
+            .map(|(a, (v, t))| WriteItem { address: a.clone(), value: *v, vtype: t.clone() })
+            .collect();
+        let gid = self.generation;
+        self.send_job(Req::Write { gid, kind: WriteKind::Lock, pid, items });
+    }
+
+    fn on_lock_toggled(&mut self, i: usize) {
+        let Some(row) = self.result_rows.get_mut(i) else { return };
+        let address = row.address.clone();
+        if row.locked {
+            row.locked = false;
+            self.locked.remove(&address);
+            log_info!("LOCK OFF address={}", address);
+            self.status = format!("Lock desativado: {}", address);
+            return;
+        }
+        let value_text = row.value.trim().to_string();
+        match parse_int(&value_text) {
+            Some(v) => {
+                row.locked = true;
+                self.locked.insert(address.clone(), (v, "int32".into()));
+                log_info!("LOCK ON address={} value={} type=int32", address, v);
+                self.status = format!("Lock ativo: {} = {} (escrita a cada 250 ms)", address, v);
+            }
+            None => {
+                self.status = format!("Não é possível fixar o valor '{}' nesta versão.", value_text);
+            }
+        }
+    }
+
+    fn clear_locks(&mut self, update_status: bool) {
+        self.locked.clear();
+        for r in &mut self.result_rows {
+            r.locked = false;
+        }
+        if update_status {
+            self.status = "Todos os locks foram desativados.".into();
+        }
+    }
+
+    // ── botões ──
+
+    fn on_reset(&mut self) {
+        self.clear_locks(false);
+        self.close_backend();
+        self.scan_has_results = false;
+        self.scan_pid = None;
+        self.clear_found_view();
+        self.found = 0;
+        self.value_input.clear();
+        self.status = "Search controls reset.".into();
+    }
+
+    fn on_clear(&mut self) {
+        self.clear_locks(false);
+        self.clear_work_list();
+        self.status = "Lista de baixo limpa.".into();
+    }
+
+    // ── seleção / edição de linhas ──
+
+    fn select_all(&mut self) {
+        self.selected_rows = (0..self.result_rows.len()).collect();
+    }
+
+    fn click_row(&mut self, i: usize, ctrl: bool, shift: bool) {
+        // Clique simples numa linha já selecionada (multisseleção) mantém a seleção,
+        // para o duplo clique / F2 editarem todas as linhas de uma vez.
+        if !ctrl && !shift && self.selected_rows.len() > 1 && self.selected_rows.contains(&i) {
+            self.cursor = Some(i);
+            return;
+        }
+        apply_click(&mut self.selected_rows, &mut self.anchor, i, ctrl, shift);
+        self.cursor = Some(i);
+    }
+
+    fn click_found(&mut self, i: usize, ctrl: bool, shift: bool) {
+        apply_click(&mut self.found_selected, &mut self.found_anchor, i, ctrl, shift);
+    }
+
+    /// Copia linhas da lista "Found" para a lista de baixo (sem duplicar endereços).
+    fn add_found_rows(&mut self, idx: &[usize]) {
+        let mut added = 0usize;
+        let mut dup = 0usize;
+        for &i in idx {
+            let Some(r) = self.found_rows.get(i) else { continue };
+            if self.result_rows.iter().any(|x| x.address == r.address) {
+                dup += 1;
+                continue;
+            }
+            let mut row = r.clone();
+            row.locked = self.locked.contains_key(&row.address);
+            self.result_rows.push(row);
+            added += 1;
+        }
+        self.status = if dup > 0 {
+            format!("{} endereço(s) adicionado(s); {} já estavam na lista.", added, dup)
+        } else {
+            format!("{} endereço(s) adicionado(s) à lista de baixo.", added)
+        };
+    }
+
+    fn add_selected_found(&mut self) {
+        let mut idx: Vec<usize> = self.found_selected.iter().copied().collect();
+        idx.sort_unstable();
+        if idx.is_empty() {
+            self.status = "Seleciona primeiro linhas na lista Found (Ctrl/Shift para várias).".into();
+            return;
+        }
+        self.add_found_rows(&idx);
+    }
+
+    fn begin_edit(&mut self, i: usize) {
+        if let Some(r) = self.result_rows.get(i) {
+            self.editing = Some((i, r.value.clone(), true));
+            self.cursor = Some(i);
+        }
+    }
+
+    /// F2: edita a linha do cursor (ou a primeira selecionada).
+    fn begin_edit_cursor(&mut self) {
+        let row = self
+            .cursor
+            .filter(|i| *i < self.result_rows.len())
+            .or_else(|| self.selected_rows.iter().copied().min());
+        match row {
+            Some(i) => self.begin_edit(i),
+            None => self.status = "Seleciona uma linha para editar o valor.".into(),
+        }
+    }
+
+    // ── desenho ──
+
+    fn ui_address_list(&mut self, ui: &mut egui::Ui) {
+        let mut add_clicked = false;
+        ui.horizontal(|ui| {
+            ui.label(format!("Found: {}", self.found));
+            ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
+                let can = !self.found_rows.is_empty();
+                if ui.add_enabled(can, egui::Button::new("Add Selected")).clicked() {
+                    add_clicked = true;
+                }
+            });
+        });
+        ui.separator();
+        ui.spacing_mut().item_spacing.y = 0.0;
+        let k = self.ui_scale();
+        let w = [150.0 * k, 0.0];
+        let mods = ui.input(|i| i.modifiers);
+        let mut click: Option<(usize, bool, bool)> = None;
+        let mut dbl: Option<usize> = None;
+        draw_row(ui, &w, &["Address", "Value"], &[false, false], false, false, true);
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            for (i, row) in self.found_rows.iter().enumerate() {
+                let sel = self.found_selected.contains(&i);
+                let (resp, _) = draw_row(
+                    ui,
+                    &w,
+                    &[row.address.as_str(), row.value.as_str()],
+                    &[true, true],
+                    sel,
+                    i % 2 == 1,
+                    false,
+                );
+                if resp.double_clicked() {
+                    dbl = Some(i);
+                } else if resp.clicked() {
+                    click = Some((i, mods.command, mods.shift));
+                }
+            }
+        });
+        if let Some((i, c, sh)) = click {
+            self.click_found(i, c, sh);
+        }
+        if let Some(i) = dbl {
+            self.add_found_rows(&[i]);
+        }
+        if add_clicked {
+            self.add_selected_found();
+        }
+    }
+
+    fn ui_controls(&mut self, ui: &mut egui::Ui) {
+        ui.label(RichText::new("Process selection").strong());
+        ui.horizontal(|ui| {
+            let w = (ui.available_width() - 90.0).max(60.0);
+            ui.add(
+                egui::TextEdit::singleline(&mut self.process_filter)
+                    .hint_text("Filter process name, PID or user…")
+                    .desired_width(w),
+            );
+            if ui
+                .add(egui::Button::image_and_text(
+                    ico(ui, egui::include_image!("icons/refresh-32x32.png")),
+                    "Refresh",
+                ))
+                .clicked()
+            {
+                self.refresh_processes();
+            }
+        });
+
+        // Tabela de processos
+        let q = self.process_filter.trim().to_lowercase();
+        let mut clicked: Option<ProcessRow> = None;
+        let mut new_sort: Option<usize> = None;
+        let k = self.ui_scale();
+        let pw = [70.0 * k, 130.0 * k, 0.0];
+        let proc_h = 6.0 * (ui.text_style_height(&egui::TextStyle::Body) + 8.0);
+        ui.scope(|ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            let arrow = |c: usize| {
+                if self.sort_col == c {
+                    if self.sort_asc { " ▲" } else { " ▼" }
+                } else {
+                    ""
+                }
+            };
+            let h0 = format!("PID{}", arrow(0));
+            let h1 = format!("User{}", arrow(1));
+            let h2 = format!("Process{}", arrow(2));
+            let (resp, rects) = draw_row(
+                ui, &pw, &[h0.as_str(), h1.as_str(), h2.as_str()], &[false; 3], false, false, true,
+            );
+            if resp.clicked() {
+                if let Some(pos) = resp.interact_pointer_pos() {
+                    new_sort = rects.iter().position(|r| r.contains(pos));
+                }
+            }
+            egui::ScrollArea::vertical()
+                .max_height(proc_h)
+                .min_scrolled_height(proc_h)
+                .auto_shrink([false, false])
+                .show(ui, |ui| {
+                    ui.spacing_mut().item_spacing.y = 0.0;
+                    let mut n = 0usize;
+                    for p in &self.processes {
+                        if !q.is_empty()
+                            && !format!("{} {} {}", p.pid, p.user, p.command)
+                                .to_lowercase()
+                                .contains(&q)
+                        {
+                            continue;
+                        }
+                        let sel = self.selected_pid == Some(p.pid);
+                        let pid_s = p.pid.to_string();
+                        let (resp, _) = draw_row(
+                            ui,
+                            &pw,
+                            &[pid_s.as_str(), p.user.as_str(), p.command.as_str()],
+                            &[true, false, false],
+                            sel,
+                            n % 2 == 1,
+                            false,
+                        );
+                        if resp.clicked() {
+                            clicked = Some(p.clone());
+                        }
+                        n += 1;
+                    }
+                });
+        });
+        if let Some(c) = new_sort {
+            if self.sort_col == c {
+                self.sort_asc = !self.sort_asc;
+            } else {
+                self.sort_col = c;
+                self.sort_asc = true;
+            }
+            self.sort_processes();
+        }
+        if let Some(p) = clicked {
+            if self.selected_pid != Some(p.pid) {
+                self.on_process_selected(&p);
+            }
+        }
+
+        ui.label(self.selected_text.as_str());
+        ui.separator();
+
+        // Linha de valor
+        ui.horizontal(|ui| {
+            ui.label("Value:");
+            let w = (ui.available_width() - 200.0).max(60.0);
+            let resp = ui.add(
+                egui::TextEdit::singleline(&mut self.value_input)
+                    .hint_text("Integer value, e.g. 123456")
+                    .desired_width(w),
+            );
+            let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
+            let label = if self.scan_has_results { "Next Search" } else { "Search" };
+            let can = !self.searching;
+            let search_btn = egui::Button::image_and_text(
+                ico(ui, egui::include_image!("icons/search-32x32.png")),
+                label,
+            );
+            if ui.add_enabled(can, search_btn).clicked() || (enter && can) {
+                self.on_search();
+            }
+            if ui
+                .add(egui::Button::image_and_text(
+                    ico(ui, egui::include_image!("icons/reset-32x32.png")),
+                    "Reset",
+                ))
+                .clicked()
+            {
+                self.on_reset();
+            }
+        });
+
+        ui.label("Integer scan via scanmem. Lock: tick a result to keep writing its current value every 250 ms.");
+    }
+
+    fn ui_results(&mut self, ui: &mut egui::Ui) {
+        // Botões centrados por cima da grelha.
+        let k = self.ui_scale();
+        let bw = 120.0 * k;
+        let total = bw * 3.0 + ui.spacing().item_spacing.x * 2.0;
+        ui.horizontal(|ui| {
+            ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
+            let b = egui::Button::image_and_text(
+                ico(ui, egui::include_image!("icons/select_all-32x32.png")),
+                "Select all",
+            );
+            if ui.add_sized([bw, 26.0 * k], b).clicked() {
+                self.select_all();
+            }
+            let b = egui::Button::image_and_text(
+                ico(ui, egui::include_image!("icons/clear-32x32.png")),
+                "Clear results",
+            );
+            if ui.add_sized([bw, 26.0 * k], b).clicked() {
+                self.on_clear();
+            }
+            if ui.add_sized([bw, 26.0 * k], egui::Button::new("Quit")).clicked() {
+                ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
+            }
+        });
+        ui.add_space(4.0);
+
+        let esc = ui.input(|i| i.key_pressed(egui::Key::Escape));
+        let mods = ui.input(|i| i.modifiers);
+        let was_editing = self.editing.is_some();
+        let mut editing = self.editing.take();
+        let mut toggle: Option<usize> = None;
+        let mut click: Option<(usize, bool, bool)> = None;
+        let mut start_edit: Option<usize> = None;
+        let mut commit: Option<(usize, String)> = None;
+        let mut cancel = false;
+
+        let w = [56.0 * k, 230.0 * k, 170.0 * k, 150.0 * k, 0.0];
+        ui.spacing_mut().item_spacing.y = 0.0;
+        draw_row(
+            ui, &w, &["Lock", "Description", "Address", "Type", "Value"], &[false; 5], false, false, true,
+        );
+
+        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
+            ui.spacing_mut().item_spacing.y = 0.0;
+            if self.result_rows.is_empty() {
+                ui.add_space(8.0);
+                ui.weak("Seleciona linhas na lista Found e usa \"Add Selected\" (ou duplo clique numa linha) para as trazer para aqui.");
+            }
+            for i in 0..self.result_rows.len() {
+                let sel = self.selected_rows.contains(&i);
+                let row = &self.result_rows[i];
+                let editing_here = matches!(&editing, Some((r, _, _)) if *r == i);
+                let value_text = if editing_here { "" } else { row.value.as_str() };
+                let (resp, rects) = draw_row(
+                    ui,
+                    &w,
+                    &["", row.description.as_str(), row.address.as_str(), row.types.as_str(), value_text],
+                    &[false, false, true, true, true],
+                    sel,
+                    i % 2 == 1,
+                    false,
+                );
+
+                let lock_img = if row.locked {
+                    ico(ui, egui::include_image!("icons/lock-32x32.png"))
+                } else {
+                    ico(ui, egui::include_image!("icons/unlock-32x32.png"))
+                };
+                if ui.put(rects[0], egui::ImageButton::new(lock_img).frame(false)).clicked() {
+                    toggle = Some(i);
+                }
+
+                if let Some((r, buf, need_focus)) = editing.as_mut() {
+                    if *r == i {
+                        let er = ui.put(
+                            rects[4].shrink2(egui::vec2(4.0, 1.0)),
+                            egui::TextEdit::singleline(buf)
+                                .id(egui::Id::new(("cell_edit", i)))
+                                .font(egui::TextStyle::Monospace)
+                                .desired_width(rects[4].width() - 8.0),
+                        );
+                        if *need_focus {
+                            er.request_focus();
+                            *need_focus = false;
+                        }
+                        if er.lost_focus() {
+                            if esc {
+                                cancel = true;
+                            } else {
+                                commit = Some((i, buf.clone()));
+                            }
+                        }
+                    }
+                }
+
+                if !editing_here {
+                    let mut handled = false;
+                    if resp.double_clicked() {
+                        // Duplo clique na coluna Value (ou F2) edita o valor.
+                        let on_value = resp
+                            .interact_pointer_pos()
+                            .map_or(false, |p| p.x >= rects[4].left());
+                        if on_value {
+                            start_edit = Some(i);
+                            handled = true;
+                        }
+                    }
+                    if !handled && resp.clicked() {
+                        click = Some((i, mods.command, mods.shift));
+                    }
+                }
+            }
+        });
+
+        self.editing = editing;
+        if esc && !was_editing && !ui.ctx().wants_keyboard_input() {
+            self.selected_rows.clear();
+        }
+        if cancel {
+            self.editing = None;
+        }
+        if let Some((i, text)) = commit {
+            self.editing = None;
+            self.commit_edit(i, text);
+        }
+        if let Some(i) = start_edit {
+            self.begin_edit(i);
+        }
+        if let Some(i) = toggle {
+            self.on_lock_toggled(i);
+        }
+        if let Some((i, ctrl, shift)) = click {
+            self.click_row(i, ctrl, shift);
+        }
+    }
+}
+
+impl eframe::App for BSDConqueror {
+    /// FreeBSD/X11: muitas configurações mapeiam a tecla Backspace para o
+    /// keysym "Delete". O egui então só apaga *para a frente* e nada acontece
+    /// no fim do texto. A tecla física continua a ser Backspace, por isso
+    /// repomos o comportamento esperado.
+    fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
+        for ev in &mut raw_input.events {
+            if let egui::Event::Key { key, physical_key, .. } = ev {
+                if *key == egui::Key::Delete && *physical_key == Some(egui::Key::Backspace) {
+                    *key = egui::Key::Backspace;
+                }
+            }
+        }
+    }
+
+    fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
+        // Ctrl + roda do rato: aumenta/diminui toda a interface (texto incluído).
+        // (Ctrl +, Ctrl - e Ctrl 0 já são tratados pelo próprio egui.)
+        let (zoom, ctrl, scroll) =
+            ctx.input(|i| (i.zoom_delta(), i.modifiers.command, i.raw_scroll_delta.y));
+        let factor = if (zoom - 1.0).abs() > f32::EPSILON {
+            zoom
+        } else if ctrl && scroll != 0.0 {
+            (scroll / 500.0).exp()
+        } else {
+            1.0
+        };
+        if (factor - 1.0).abs() > f32::EPSILON {
+            ctx.set_zoom_factor((ctx.zoom_factor() * factor).clamp(0.7, 3.0));
+        }
+
+        self.handle_responses();
+        self.handle_font_zoom(ctx);
+        self.tick_locks();
+        ctx.request_repaint_after(Duration::from_millis(100));
+
+        if !ctx.wants_keyboard_input() {
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::A)) {
+                self.select_all();
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
+                self.begin_edit_cursor();
+            }
+        }
+
+        egui::TopBottomPanel::bottom("status_panel").show(ctx, |ui| {
+            ui.horizontal(|ui| {
+                if self.searching {
+                    ui.spinner();
+                }
+                ui.label(self.status.as_str());
+            });
+        });
+
+        egui::TopBottomPanel::top("upper_panel")
+            .resizable(true)
+            .default_height(370.0)
+            .show(ctx, |ui| {
+                egui::SidePanel::left("address_panel")
+                    .default_width(300.0)
+                    .resizable(true)
+                    .show_inside(ui, |ui| {
+                        self.ui_address_list(ui);
+                    });
+                egui::CentralPanel::default().show_inside(ui, |ui| {
+                    self.ui_controls(ui);
+                });
+            });
+
+        egui::CentralPanel::default().show(ctx, |ui| {
+            self.ui_results(ui);
+        });
+
+        // X11/XIM: com o IME ativo, setas/Backspace podem ser "engolidos" pelo
+        // método de entrada. Esta aplicação só precisa de números, por isso
+        // desativamos o IME em todas as caixas de texto.
+        ctx.output_mut(|o| o.ime = None);
+    }
+}
+
+impl Drop for BSDConqueror {
+    fn drop(&mut self) {
+        log_info!("Aplicação encerrada");
+        if let Some(tx) = &self.req_tx {
+            let _ = tx.send(Req::Shutdown);
+        }
+        // Só espera pela thread se não houver operação longa em curso;
+        // caso contrário o scanmem termina sozinho ao fechar o stdin.
+        if self.in_flight == 0 {
+            if let Some(h) = self.worker.take() {
+                let _ = h.join();
+            }
+        }
+    }
+}
+
+/// Ícone da janela (src/icons/GameConqueror.png).
+fn load_icon() -> Option<egui::IconData> {
+    let bytes = include_bytes!("icons/GameConqueror.png");
+    let img = image::load_from_memory(bytes).ok()?.into_rgba8();
+    let (width, height) = img.dimensions();
+    Some(egui::IconData { rgba: img.into_raw(), width, height })
+}
+
+fn main() -> Result<(), eframe::Error> {
+    init_log();
+    log_info!("BSDConqueror {} iniciado", APP_VERSION);
+    let mut viewport = egui::ViewportBuilder::default()
+        .with_inner_size([920.0, 650.0])
+        .with_app_id("bsdconqueror");
+    if let Some(icon) = load_icon() {
+        viewport = viewport.with_icon(std::sync::Arc::new(icon));
+    }
+    let options = eframe::NativeOptions { viewport, ..Default::default() };
+    eframe::run_native(
+        &format!("BSDConqueror {}", APP_VERSION),
+        options,
+        Box::new(|cc| Ok(Box::new(BSDConqueror::new(cc)))),
+    )
+}

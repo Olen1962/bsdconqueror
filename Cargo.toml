@@ -1,0 +1,10 @@
+[package]
+name = "bsdconqueror"
+version = "0.12.0"
+edition = "2021"
+
+[dependencies]
+eframe = "0.29"
+egui_extras = { version = "0.29", features = ["image"] }
+regex = "1"
+image = { version = "0.25", default-features = false, features = ["png"] }
