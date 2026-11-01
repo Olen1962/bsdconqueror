@@ -558,6 +558,138 @@ fn parse_ps_line(line: &str) -> Option<ProcessRow> {
     })
 }
 
+// ───────────────────────────── Preferências ─────────────────────────────
+// Ficheiro simples chave=valor em $XDG_CONFIG_HOME/bsdconqueror/config.ini
+// (ou ~/.config/bsdconqueror/config.ini). Sem dependências extra.
+
+#[derive(Clone, Debug)]
+struct Prefs {
+    font_delta: f32,
+    zoom: f32,
+    /// Tamanho da janela em pontos "nativos" (antes do zoom).
+    win: Option<(f32, f32)>,
+    /// Larguras (unidades base) das colunas fixas de cada tabela.
+    col_results: [f32; 4],
+    col_found: f32,
+    col_proc: [f32; 2],
+    left_w: f32,
+    top_h: f32,
+}
+
+impl Default for Prefs {
+    fn default() -> Self {
+        Self {
+            font_delta: 2.0,
+            zoom: 1.0,
+            win: None,
+            col_results: [56.0, 230.0, 170.0, 150.0],
+            col_found: 150.0,
+            col_proc: [70.0, 130.0],
+            left_w: 300.0,
+            top_h: 370.0,
+        }
+    }
+}
+
+impl Prefs {
+    fn path() -> Option<PathBuf> {
+        let base = std::env::var_os("XDG_CONFIG_HOME")
+            .filter(|v| !v.is_empty())
+            .map(PathBuf::from)
+            .or_else(|| std::env::var_os("HOME").map(|h| PathBuf::from(h).join(".config")))?;
+        Some(base.join("bsdconqueror").join("config.ini"))
+    }
+
+    fn load() -> Self {
+        let mut p = Self::default();
+        let Some(path) = Self::path() else { return p };
+        let Ok(text) = std::fs::read_to_string(path) else { return p };
+        for line in text.lines() {
+            let Some((k, v)) = line.split_once('=') else { continue };
+            let (k, v) = (k.trim(), v.trim());
+            let nums: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
+            match k {
+                "font_delta" if nums.len() == 1 => p.font_delta = nums[0].clamp(-4.0, 14.0),
+                "zoom" if nums.len() == 1 => p.zoom = nums[0].clamp(0.7, 3.0),
+                "window" if nums.len() == 2 => {
+                    p.win = Some((nums[0].clamp(500.0, 8000.0), nums[1].clamp(350.0, 8000.0)))
+                }
+                "col_results" if nums.len() == 4 => {
+                    for i in 0..4 {
+                        p.col_results[i] = nums[i].clamp(30.0, 1200.0);
+                    }
+                }
+                "col_found" if nums.len() == 1 => p.col_found = nums[0].clamp(30.0, 1200.0),
+                "col_proc" if nums.len() == 2 => {
+                    for i in 0..2 {
+                        p.col_proc[i] = nums[i].clamp(30.0, 1200.0);
+                    }
+                }
+                "left_w" if nums.len() == 1 => p.left_w = nums[0].clamp(150.0, 2000.0),
+                "top_h" if nums.len() == 1 => p.top_h = nums[0].clamp(150.0, 2000.0),
+                _ => {}
+            }
+        }
+        p
+    }
+
+    fn to_text(&self) -> String {
+        let mut t = String::new();
+        t.push_str("# BSDConqueror - preferências (geradas automaticamente)\n");
+        t.push_str(&format!("font_delta={:.1}\n", self.font_delta));
+        t.push_str(&format!("zoom={:.2}\n", self.zoom));
+        if let Some((w, h)) = self.win {
+            t.push_str(&format!("window={:.0},{:.0}\n", w, h));
+        }
+        t.push_str(&format!(
+            "col_results={:.0},{:.0},{:.0},{:.0}\n",
+            self.col_results[0], self.col_results[1], self.col_results[2], self.col_results[3]
+        ));
+        t.push_str(&format!("col_found={:.0}\n", self.col_found));
+        t.push_str(&format!("col_proc={:.0},{:.0}\n", self.col_proc[0], self.col_proc[1]));
+        t.push_str(&format!("left_w={:.0}\n", self.left_w));
+        t.push_str(&format!("top_h={:.0}\n", self.top_h));
+        t
+    }
+
+    fn save(&self) {
+        if let Some(path) = Self::path() {
+            if let Some(dir) = path.parent() {
+                let _ = std::fs::create_dir_all(dir);
+            }
+            if let Err(e) = std::fs::write(&path, self.to_text()) {
+                log_warn!("Não foi possível guardar preferências em {:?}: {}", path, e);
+            }
+        }
+    }
+}
+
+/// Pegas arrastáveis nas separações do cabeçalho: redimensionam as colunas
+/// fixas (todas menos a última). `widths` está em unidades base (sem zoom de letra).
+fn col_handles(ui: &mut egui::Ui, rects: &[egui::Rect], widths: &mut [f32], k: f32, tag: &str) {
+    let n = widths.len().min(rects.len().saturating_sub(1));
+    for i in 0..n {
+        let x = rects[i].right();
+        let handle = egui::Rect::from_center_size(
+            egui::pos2(x, rects[i].center().y),
+            egui::vec2(8.0, rects[i].height()),
+        );
+        let id = ui.id().with((tag, i));
+        let r = ui.interact(handle, id, egui::Sense::drag());
+        if r.hovered() || r.dragged() {
+            ui.ctx().set_cursor_icon(egui::CursorIcon::ResizeHorizontal);
+        }
+        if r.dragged() {
+            widths[i] = (widths[i] + r.drag_delta().x / k.max(0.1)).clamp(30.0, 1200.0);
+        }
+        ui.painter().vline(
+            x,
+            rects[i].y_range(),
+            egui::Stroke::new(1.0_f32, egui::Color32::from_black_alpha(50)),
+        );
+    }
+}
+
 /// Lógica de seleção (clique, Ctrl, Shift) partilhada pelas duas listas.
 fn apply_click(sel: &mut HashSet<usize>, anchor: &mut Option<usize>, i: usize, ctrl: bool, shift: bool) {
     if shift {
@@ -695,11 +827,23 @@ struct BSDConqueror {
     base_sizes: Vec<(egui::TextStyle, f32)>,
     font_delta: f32,
     scroll_acc: f32,
+
+    // preferências persistentes
+    col_results: [f32; 4],
+    col_found: f32,
+    col_proc: [f32; 2],
+    left_w: f32,
+    top_h: f32,
+    win_size: Option<(f32, f32)>,
+    cur_prefs: Prefs,
+    last_prefs: String,
+    last_prefs_check: Instant,
 }
 
 impl BSDConqueror {
-    fn new(cc: &eframe::CreationContext<'_>) -> Self {
+    fn new(cc: &eframe::CreationContext<'_>, prefs: Prefs) -> Self {
         cc.egui_ctx.set_visuals(egui::Visuals::light());
+        cc.egui_ctx.set_zoom_factor(prefs.zoom);
         egui_extras::install_image_loaders(&cc.egui_ctx);
         let base_sizes: Vec<(egui::TextStyle, f32)> = cc
             .egui_ctx
@@ -750,8 +894,17 @@ impl BSDConqueror {
             anchor: None,
             editing: None,
             base_sizes,
-            font_delta: 2.0,
+            font_delta: prefs.font_delta,
             scroll_acc: 0.0,
+            col_results: prefs.col_results,
+            col_found: prefs.col_found,
+            col_proc: prefs.col_proc,
+            left_w: prefs.left_w,
+            top_h: prefs.top_h,
+            win_size: prefs.win,
+            last_prefs: prefs.to_text(),
+            cur_prefs: prefs.clone(),
+            last_prefs_check: Instant::now(),
             status: "Ready — Search, refine with Next Search, and lock results when 20 or fewer remain."
                 .into(),
         };
@@ -801,6 +954,44 @@ impl BSDConqueror {
         if self.font_delta != before {
             self.apply_font(ctx);
             self.status = format!("Tamanho da letra: {:.1} pt", 12.5 + self.font_delta);
+        }
+    }
+
+    // ── preferências ──
+
+    /// Recolhe o estado atual; grava no máximo 1x por segundo, e só se mudou.
+    fn update_prefs(&mut self, ctx: &egui::Context) {
+        let (rect, minimized, maximized) = ctx.input(|i| {
+            let v = i.viewport();
+            (v.inner_rect, v.minimized, v.maximized)
+        });
+        let z = ctx.zoom_factor();
+        if minimized != Some(true) && maximized != Some(true) {
+            if let Some(r) = rect {
+                self.win_size = Some((r.width() * z, r.height() * z));
+            }
+        }
+        self.cur_prefs = Prefs {
+            font_delta: self.font_delta,
+            zoom: z,
+            win: self.win_size,
+            col_results: self.col_results,
+            col_found: self.col_found,
+            col_proc: self.col_proc,
+            left_w: self.left_w,
+            top_h: self.top_h,
+        };
+        if self.last_prefs_check.elapsed() >= Duration::from_secs(1) {
+            self.last_prefs_check = Instant::now();
+            self.flush_prefs();
+        }
+    }
+
+    fn flush_prefs(&mut self) {
+        let t = self.cur_prefs.to_text();
+        if t != self.last_prefs {
+            self.cur_prefs.save();
+            self.last_prefs = t;
         }
     }
 
@@ -1294,11 +1485,12 @@ impl BSDConqueror {
         ui.separator();
         ui.spacing_mut().item_spacing.y = 0.0;
         let k = self.ui_scale();
-        let w = [150.0 * k, 0.0];
+        let w = [self.col_found * k, 0.0];
         let mods = ui.input(|i| i.modifiers);
         let mut click: Option<(usize, bool, bool)> = None;
         let mut dbl: Option<usize> = None;
-        draw_row(ui, &w, &["Address", "Value"], &[false, false], false, false, true);
+        let (_, hr) = draw_row(ui, &w, &["Address", "Value"], &[false, false], false, false, true);
+        col_handles(ui, &hr, std::slice::from_mut(&mut self.col_found), k, "found");
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
             for (i, row) in self.found_rows.iter().enumerate() {
@@ -1355,7 +1547,7 @@ impl BSDConqueror {
         let mut clicked: Option<ProcessRow> = None;
         let mut new_sort: Option<usize> = None;
         let k = self.ui_scale();
-        let pw = [70.0 * k, 130.0 * k, 0.0];
+        let pw = [self.col_proc[0] * k, self.col_proc[1] * k, 0.0];
         let proc_h = 6.0 * (ui.text_style_height(&egui::TextStyle::Body) + 8.0);
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1372,6 +1564,7 @@ impl BSDConqueror {
             let (resp, rects) = draw_row(
                 ui, &pw, &[h0.as_str(), h1.as_str(), h2.as_str()], &[false; 3], false, false, true,
             );
+            col_handles(ui, &rects, &mut self.col_proc, k, "proc");
             if resp.clicked() {
                 if let Some(pos) = resp.interact_pointer_pos() {
                     new_sort = rects.iter().position(|r| r.contains(pos));
@@ -1498,11 +1691,13 @@ impl BSDConqueror {
         let mut commit: Option<(usize, String)> = None;
         let mut cancel = false;
 
-        let w = [56.0 * k, 230.0 * k, 170.0 * k, 150.0 * k, 0.0];
+        let cr = self.col_results;
+        let w = [cr[0] * k, cr[1] * k, cr[2] * k, cr[3] * k, 0.0];
         ui.spacing_mut().item_spacing.y = 0.0;
-        draw_row(
+        let (_, hr) = draw_row(
             ui, &w, &["Lock", "Description", "Address", "Type", "Value"], &[false; 5], false, false, true,
         );
+        col_handles(ui, &hr, &mut self.col_results, k, "results");
 
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1653,24 +1848,28 @@ impl eframe::App for BSDConqueror {
             });
         });
 
-        egui::TopBottomPanel::top("upper_panel")
+        let top = egui::TopBottomPanel::top("upper_panel")
             .resizable(true)
-            .default_height(370.0)
+            .default_height(self.top_h)
             .show(ctx, |ui| {
-                egui::SidePanel::left("address_panel")
-                    .default_width(300.0)
+                let side = egui::SidePanel::left("address_panel")
+                    .default_width(self.left_w)
                     .resizable(true)
                     .show_inside(ui, |ui| {
                         self.ui_address_list(ui);
                     });
+                self.left_w = side.response.rect.width();
                 egui::CentralPanel::default().show_inside(ui, |ui| {
                     self.ui_controls(ui);
                 });
             });
+        self.top_h = top.response.rect.height();
 
         egui::CentralPanel::default().show(ctx, |ui| {
             self.ui_results(ui);
         });
+
+        self.update_prefs(ctx);
 
         // X11/XIM: com o IME ativo, setas/Backspace podem ser "engolidos" pelo
         // método de entrada. Esta aplicação só precisa de números, por isso
@@ -1681,6 +1880,7 @@ impl eframe::App for BSDConqueror {
 
 impl Drop for BSDConqueror {
     fn drop(&mut self) {
+        self.flush_prefs();
         log_info!("Aplicação encerrada");
         if let Some(tx) = &self.req_tx {
             let _ = tx.send(Req::Shutdown);
@@ -1706,8 +1906,10 @@ fn load_icon() -> Option<egui::IconData> {
 fn main() -> Result<(), eframe::Error> {
     init_log();
     log_info!("BSDConqueror {} iniciado", APP_VERSION);
+    let prefs = Prefs::load();
+    let (win_w, win_h) = prefs.win.unwrap_or((920.0, 650.0));
     let mut viewport = egui::ViewportBuilder::default()
-        .with_inner_size([920.0, 650.0])
+        .with_inner_size([win_w, win_h])
         .with_app_id("bsdconqueror");
     if let Some(icon) = load_icon() {
         viewport = viewport.with_icon(std::sync::Arc::new(icon));
@@ -1716,6 +1918,6 @@ fn main() -> Result<(), eframe::Error> {
     eframe::run_native(
         &format!("BSDConqueror {}", APP_VERSION),
         options,
-        Box::new(|cc| Ok(Box::new(BSDConqueror::new(cc)))),
+        Box::new(move |cc| Ok(Box::new(BSDConqueror::new(cc, prefs)))),
     )
 }
