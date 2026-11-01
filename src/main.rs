@@ -22,6 +22,8 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant, SystemTime, UNIX_EPOCH};
 
 const APP_VERSION: &str = "0.12.0";
+/// Aumento fixo da letra em relação ao padrão do egui (12,5 pt).
+const FONT_BONUS: f32 = 2.0;
 const INT32_MIN: i64 = -2_147_483_648;
 const UINT32_MAX: i64 = 4_294_967_295;
 const LIST_LIMIT: usize = 20;
@@ -603,7 +605,6 @@ fn parse_ps_line(line: &str) -> Option<ProcessRow> {
 
 #[derive(Clone, Debug)]
 struct Prefs {
-    font_delta: f32,
     zoom: f32,
     /// Tamanho da janela em pontos "nativos" (antes do zoom).
     win: Option<(f32, f32)>,
@@ -618,7 +619,6 @@ struct Prefs {
 impl Default for Prefs {
     fn default() -> Self {
         Self {
-            font_delta: 2.0,
             zoom: 1.0,
             win: None,
             col_results: [56.0, 230.0, 170.0, 150.0],
@@ -648,7 +648,6 @@ impl Prefs {
             let (k, v) = (k.trim(), v.trim());
             let nums: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
             match k {
-                "font_delta" if nums.len() == 1 => p.font_delta = nums[0].clamp(-4.0, 14.0),
                 "zoom" if nums.len() == 1 => p.zoom = nums[0].clamp(0.7, 3.0),
                 "window" if nums.len() == 2 => {
                     p.win = Some((nums[0].clamp(500.0, 8000.0), nums[1].clamp(350.0, 8000.0)))
@@ -675,7 +674,6 @@ impl Prefs {
     fn to_text(&self) -> String {
         let mut t = String::new();
         t.push_str("# BSDConqueror - preferências (geradas automaticamente)\n");
-        t.push_str(&format!("font_delta={:.1}\n", self.font_delta));
         t.push_str(&format!("zoom={:.2}\n", self.zoom));
         if let Some((w, h)) = self.win {
             t.push_str(&format!("window={:.0},{:.0}\n", w, h));
@@ -876,8 +874,6 @@ struct BSDConqueror {
 
     // tamanho da letra (Ctrl + roda do rato)
     base_sizes: Vec<(egui::TextStyle, f32)>,
-    font_delta: f32,
-    scroll_acc: f32,
 
     // preferências persistentes
     col_results: [f32; 4],
@@ -949,8 +945,6 @@ impl BSDConqueror {
             anchor: None,
             editing: None,
             base_sizes,
-            font_delta: prefs.font_delta,
-            scroll_acc: 0.0,
             col_results: prefs.col_results,
             col_found: prefs.col_found,
             col_proc: prefs.col_proc,
@@ -972,11 +966,12 @@ impl BSDConqueror {
 
     // ── tamanho da letra ──
 
+    /// Aplica o aumento fixo de letra (o zoom é tratado só pelo zoom_factor do egui).
     fn apply_font(&self, ctx: &egui::Context) {
         ctx.style_mut(|st| {
             for (ts, base) in &self.base_sizes {
                 if let Some(f) = st.text_styles.get_mut(ts) {
-                    f.size = (base + self.font_delta).max(6.0);
+                    f.size = base + FONT_BONUS;
                 }
             }
         });
@@ -984,34 +979,7 @@ impl BSDConqueror {
 
     /// Fator em relação ao tamanho de letra por omissão do egui (12.5).
     fn ui_scale(&self) -> f32 {
-        ((12.5 + self.font_delta) / 12.5).max(0.5)
-    }
-
-    /// Ctrl + roda do rato: aumenta/diminui a letra (1 pt por "clique").
-    fn handle_font_zoom(&mut self, ctx: &egui::Context) {
-        let (ctrl, scroll) = ctx.input(|i| (i.modifiers.command, i.raw_scroll_delta.y));
-        if !ctrl {
-            self.scroll_acc = 0.0;
-            return;
-        }
-        if scroll == 0.0 {
-            return;
-        }
-        self.scroll_acc += scroll;
-        let before = self.font_delta;
-        while self.scroll_acc >= 40.0 {
-            self.font_delta += 1.0;
-            self.scroll_acc -= 40.0;
-        }
-        while self.scroll_acc <= -40.0 {
-            self.font_delta -= 1.0;
-            self.scroll_acc += 40.0;
-        }
-        self.font_delta = self.font_delta.clamp(-4.0, 14.0);
-        if self.font_delta != before {
-            self.apply_font(ctx);
-            self.status = format!("Tamanho da letra: {:.1} pt", 12.5 + self.font_delta);
-        }
+        (12.5 + FONT_BONUS) / 12.5
     }
 
     // ── preferências ──
@@ -1029,7 +997,6 @@ impl BSDConqueror {
             }
         }
         self.cur_prefs = Prefs {
-            font_delta: self.font_delta,
             zoom: z,
             win: self.win_size,
             col_results: self.col_results,
@@ -2028,7 +1995,6 @@ impl eframe::App for BSDConqueror {
         }
 
         self.handle_responses();
-        self.handle_font_zoom(ctx);
         self.tick_locks();
         self.tick_refresh();
         ctx.request_repaint_after(Duration::from_millis(100));
