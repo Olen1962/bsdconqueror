@@ -10,7 +10,7 @@
 //!
 //! O editor de células (SingleMemoryEditor) está em `parse_value` + `commit_edit`.
 
-use eframe::egui::{self, RichText};
+use eframe::egui;
 use regex::Regex;
 use std::collections::{HashMap, HashSet};
 use std::io::{Read, Write};
@@ -280,6 +280,8 @@ impl Drop for Session {
 struct Backend {
     exe: String,
     session: Option<Session>,
+    /// Sem logs de debug (usado na atualização periódica de valores).
+    quiet: bool,
 }
 
 impl Backend {
@@ -351,6 +353,7 @@ impl Backend {
 
     /// Equivalente a `_command`.
     fn command(&mut self, cmd: &str, timeout_s: u64) -> Result<String, String> {
+        let quiet = self.quiet;
         let s = match self.session.as_mut() {
             Some(s) => s,
             None => return Err("sessão scanmem terminou".into()),
@@ -358,14 +361,18 @@ impl Backend {
         if s.exited() {
             return Err("sessão scanmem terminou".into());
         }
-        log_debug!("scanmem > {}", cmd);
+        if !quiet {
+            log_debug!("scanmem > {}", cmd);
+        }
         while s.rx.try_recv().is_ok() {} // descarta lixo antigo
         writeln!(s.stdin, "{}", cmd).map_err(|e| format!("Erro ao enviar comando: {}", e))?;
         s.stdin
             .flush()
             .map_err(|e| format!("Erro no flush: {}", e))?;
         let (out, ok) = s.read_prompt(timeout_s)?;
-        log_debug!("scanmem output (prompt={}): {}", ok, tail(&out, 4000));
+        if !quiet {
+            log_debug!("scanmem output (prompt={}): {}", ok, tail(&out, 4000));
+        }
         if !ok {
             return Err(if out.trim().is_empty() {
                 "scanmem terminou antes do prompt".to_string()
@@ -394,6 +401,29 @@ impl Backend {
         output.push('\n');
         output.push_str(&list);
         Ok((output, count))
+    }
+
+    /// Relê os valores atuais dos matches (scanmem `update` + `list`).
+    /// Nunca arranca sessões novas: sem sessão ativa devolve uma lista vazia.
+    fn refresh(&mut self, pid: i32) -> Result<Vec<ScanMatch>, String> {
+        let wrong_pid = self.session.as_ref().map(|s| s.pid) != Some(pid);
+        if !self.alive() || wrong_pid {
+            return Ok(Vec::new());
+        }
+        self.quiet = true;
+        let r = self.refresh_inner();
+        self.quiet = false;
+        r
+    }
+
+    fn refresh_inner(&mut self) -> Result<Vec<ScanMatch>, String> {
+        let up = self.command("update", 20)?;
+        let low = up.to_lowercase();
+        if low.contains("unknown") || low.contains("error") {
+            return Err(tail(&up, 300));
+        }
+        let out = self.command(&format!("list {}", LIST_LIMIT), 20)?;
+        Ok(parse_matches(&out))
     }
 
     fn write(&mut self, pid: i32, vtype: &str, address: &str, value: i64) -> Result<String, String> {
@@ -426,6 +456,7 @@ enum WriteKind {
 enum Req {
     Search { gid: u64, pid: i32, value: i64, first: bool },
     Write { gid: u64, kind: WriteKind, pid: i32, items: Vec<WriteItem> },
+    Refresh { gid: u64, pid: i32 },
     Close,
     Shutdown,
 }
@@ -456,14 +487,22 @@ enum Resp {
         kind: WriteKind,
         results: Vec<(String, i64, WriteRes)>,
     },
+    Refresh {
+        gid: u64,
+        result: Result<Vec<ScanMatch>, String>,
+    },
 }
 
 fn worker_loop(exe: String, rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context) {
-    let mut be = Backend { exe, session: None };
+    let mut be = Backend { exe, session: None, quiet: false };
     while let Ok(req) = rx.recv() {
         match req {
             Req::Shutdown => break,
             Req::Close => be.close(),
+            Req::Refresh { gid, pid } => {
+                let result = be.refresh(pid);
+                let _ = tx.send(Resp::Refresh { gid, result });
+            }
             Req::Search { gid, pid, value, first } => {
                 let result = match be.search(pid, value, first) {
                     Ok((out, count)) => {
@@ -714,6 +753,19 @@ fn apply_click(sel: &mut HashSet<usize>, anchor: &mut Option<usize>, i: usize, c
     *anchor = Some(i);
 }
 
+/// Cor de realce para títulos e cabeçalhos.
+const ACCENT: egui::Color32 = egui::Color32::from_rgb(20, 60, 130);
+
+/// Título com destaque. O egui não traz fonte a negrito, por isso simulamos:
+/// o texto é desenhado duas vezes, com um pequeno desvio, na cor de realce.
+fn title(ui: &mut egui::Ui, text: &str) {
+    let font = egui::TextStyle::Body.resolve(ui.style());
+    let galley = ui.painter().layout_no_wrap(text.to_owned(), font, ACCENT);
+    let (rect, _) = ui.allocate_exact_size(galley.size() + egui::vec2(0.7, 0.0), egui::Sense::hover());
+    ui.painter().galley(rect.min, galley.clone(), ACCENT);
+    ui.painter().galley(rect.min + egui::vec2(0.7, 0.0), galley, ACCENT);
+}
+
 /// Ícone embebido, com tamanho proporcional à letra atual.
 fn ico(ui: &egui::Ui, src: egui::ImageSource<'static>) -> egui::Image<'static> {
     let sz = ui.text_style_height(&egui::TextStyle::Body) * 1.2;
@@ -747,7 +799,7 @@ fn draw_row(
         let bg = if selected {
             v.selection.bg_fill
         } else if header {
-            egui::Color32::from_black_alpha(22)
+            egui::Color32::from_black_alpha(30)
         } else if resp.hovered() {
             egui::Color32::from_black_alpha(14)
         } else if odd {
@@ -755,7 +807,7 @@ fn draw_row(
         } else {
             egui::Color32::TRANSPARENT
         };
-        let color = if header { v.strong_text_color() } else { v.text_color() };
+        let color = if header { ACCENT } else { v.text_color() };
         let painter = ui.painter();
         painter.rect_filled(rect, 2.0, bg);
         for (i, cr) in rects.iter().enumerate() {
@@ -768,13 +820,12 @@ fn draw_row(
             } else {
                 egui::TextStyle::Body.resolve(ui.style())
             };
-            painter.with_clip_rect(cr.shrink2(egui::vec2(2.0, 0.0))).text(
-                cr.left_center() + egui::vec2(8.0, 0.0),
-                egui::Align2::LEFT_CENTER,
-                text,
-                font,
-                color,
-            );
+            let clip = painter.with_clip_rect(cr.shrink2(egui::vec2(2.0, 0.0)));
+            let pos = cr.left_center() + egui::vec2(8.0, 0.0);
+            clip.text(pos, egui::Align2::LEFT_CENTER, text, font.clone(), color);
+            if header {
+                clip.text(pos + egui::vec2(0.7, 0.0), egui::Align2::LEFT_CENTER, text, font, color);
+            }
         }
     }
     (resp, rects)
@@ -838,6 +889,10 @@ struct BSDConqueror {
     cur_prefs: Prefs,
     last_prefs: String,
     last_prefs_check: Instant,
+
+    // atualização em tempo real dos valores
+    refresh_fails: u8,
+    last_refresh: Instant,
 }
 
 impl BSDConqueror {
@@ -905,6 +960,8 @@ impl BSDConqueror {
             last_prefs: prefs.to_text(),
             cur_prefs: prefs.clone(),
             last_prefs_check: Instant::now(),
+            refresh_fails: 0,
+            last_refresh: Instant::now(),
             status: "Ready — Search, refine with Next Search, and lock results when 20 or fewer remain."
                 .into(),
         };
@@ -1313,11 +1370,68 @@ impl BSDConqueror {
                     self.searching = false;
                     self.finish_search(pid, value, first, result);
                 }
+                Resp::Refresh { gid, result } => {
+                    if gid != self.generation {
+                        continue;
+                    }
+                    match result {
+                        Ok(m) => {
+                            self.refresh_fails = 0;
+                            self.apply_refresh(&m);
+                        }
+                        Err(e) => {
+                            self.refresh_fails = self.refresh_fails.saturating_add(1);
+                            log_warn!("Atualização de valores falhou: {}", e);
+                            if self.refresh_fails == 3 {
+                                self.status = "Atualização em tempo real indisponível (ver bsdconqueror-debug.log).".into();
+                            }
+                        }
+                    }
+                }
                 Resp::Write { gid, kind, results } => {
                     if gid != self.generation {
                         continue;
                     }
                     self.finish_write(kind, results);
+                }
+            }
+        }
+    }
+
+    // ── atualização em tempo real ──
+
+    /// Pede ao scanmem os valores atuais (de ~0,7 em 0,7 s), só com a pesquisa
+    /// ativa e quando não há outras operações em curso.
+    fn tick_refresh(&mut self) {
+        if self.req_tx.is_none()
+            || self.in_flight > 0
+            || self.searching
+            || !self.scan_has_results
+            || self.found_rows.is_empty()
+            || self.refresh_fails >= 3
+            || self.last_refresh.elapsed() < Duration::from_millis(700)
+        {
+            return;
+        }
+        let Some(pid) = self.scan_pid else { return };
+        self.last_refresh = Instant::now();
+        let gid = self.generation;
+        self.send_job(Req::Refresh { gid, pid });
+    }
+
+    /// Atualiza os valores mostrados (lista Found e lista de baixo) por endereço.
+    fn apply_refresh(&mut self, matches: &[ScanMatch]) {
+        let editing_row = self.editing.as_ref().map(|e| e.0);
+        for m in matches {
+            let addr = format!("0x{:x}", m.address);
+            for r in self.found_rows.iter_mut() {
+                if r.address == addr {
+                    r.value = m.value.clone();
+                }
+            }
+            for (i, r) in self.result_rows.iter_mut().enumerate() {
+                if r.address == addr && editing_row != Some(i) {
+                    r.value = m.value.clone();
                 }
             }
         }
@@ -1344,28 +1458,89 @@ impl BSDConqueror {
         self.send_job(Req::Write { gid, kind: WriteKind::Lock, pid, items });
     }
 
+    /// Lock/unlock. Se a linha clicada pertence a uma multisseleção, aplica-se
+    /// a todas as linhas selecionadas (cada uma fica fixa no seu valor atual).
     fn on_lock_toggled(&mut self, i: usize) {
-        let Some(row) = self.result_rows.get_mut(i) else { return };
-        let address = row.address.clone();
-        if row.locked {
-            row.locked = false;
-            self.locked.remove(&address);
-            log_info!("LOCK OFF address={}", address);
-            self.status = format!("Lock desativado: {}", address);
+        let Some(first) = self.result_rows.get(i) else { return };
+        let lock = !first.locked;
+        let targets: Vec<usize> = if self.selected_rows.contains(&i) && self.selected_rows.len() > 1 {
+            let mut v: Vec<usize> = self
+                .selected_rows
+                .iter()
+                .copied()
+                .filter(|t| *t < self.result_rows.len())
+                .collect();
+            v.sort_unstable();
+            v
+        } else {
+            vec![i]
+        };
+        let mut done = 0usize;
+        let mut bad = 0usize;
+        let mut last_msg = String::new();
+        for t in &targets {
+            let row = &mut self.result_rows[*t];
+            let address = row.address.clone();
+            if lock {
+                match parse_int(row.value.trim()) {
+                    Some(v) => {
+                        row.locked = true;
+                        self.locked.insert(address.clone(), (v, "int32".into()));
+                        log_info!("LOCK ON address={} value={} type=int32", address, v);
+                        last_msg = format!("Lock ativo: {} = {} (escrita a cada 250 ms)", address, v);
+                        done += 1;
+                    }
+                    None => {
+                        last_msg = format!("Não é possível fixar o valor '{}' nesta versão.", row.value.trim());
+                        bad += 1;
+                    }
+                }
+            } else {
+                row.locked = false;
+                self.locked.remove(&address);
+                log_info!("LOCK OFF address={}", address);
+                last_msg = format!("Lock desativado: {}", address);
+                done += 1;
+            }
+        }
+        self.status = if targets.len() == 1 {
+            last_msg
+        } else if lock {
+            format!("Lock ativo em {} endereço(s){}.", done, if bad > 0 { format!("; {} sem valor válido", bad) } else { String::new() })
+        } else {
+            format!("Lock desativado em {} endereço(s).", done)
+        };
+    }
+
+    /// Remove da lista de baixo as linhas selecionadas (e respetivos locks).
+    fn remove_selected(&mut self) {
+        let mut idx: Vec<usize> = self
+            .selected_rows
+            .iter()
+            .copied()
+            .filter(|i| *i < self.result_rows.len())
+            .collect();
+        if idx.is_empty() {
+            self.status = "Seleciona linhas na lista de baixo para as remover.".into();
             return;
         }
-        let value_text = row.value.trim().to_string();
-        match parse_int(&value_text) {
-            Some(v) => {
-                row.locked = true;
-                self.locked.insert(address.clone(), (v, "int32".into()));
-                log_info!("LOCK ON address={} value={} type=int32", address, v);
-                self.status = format!("Lock ativo: {} = {} (escrita a cada 250 ms)", address, v);
-            }
-            None => {
-                self.status = format!("Não é possível fixar o valor '{}' nesta versão.", value_text);
-            }
+        idx.sort_unstable();
+        for &i in &idx {
+            let a = self.result_rows[i].address.clone();
+            self.locked.remove(&a);
         }
+        let set: HashSet<usize> = idx.iter().copied().collect();
+        let mut n = 0usize;
+        self.result_rows.retain(|_| {
+            let keep = !set.contains(&n);
+            n += 1;
+            keep
+        });
+        self.selected_rows.clear();
+        self.cursor = None;
+        self.anchor = None;
+        self.editing = None;
+        self.status = format!("{} linha(s) removida(s) da lista.", idx.len());
     }
 
     fn clear_locks(&mut self, update_status: bool) {
@@ -1474,10 +1649,14 @@ impl BSDConqueror {
     fn ui_address_list(&mut self, ui: &mut egui::Ui) {
         let mut add_clicked = false;
         ui.horizontal(|ui| {
-            ui.label(format!("Found: {}", self.found));
+            title(ui, &format!("Found: {}", self.found));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let can = !self.found_rows.is_empty();
-                if ui.add_enabled(can, egui::Button::new("Add Selected")).clicked() {
+                let add_btn = egui::Button::image_and_text(
+                    ico(ui, egui::include_image!("icons/add-32x32.png")),
+                    "Add Selected",
+                );
+                if ui.add_enabled(can, add_btn).clicked() {
                     add_clicked = true;
                 }
             });
@@ -1523,7 +1702,7 @@ impl BSDConqueror {
     }
 
     fn ui_controls(&mut self, ui: &mut egui::Ui) {
-        ui.label(RichText::new("Process selection").strong());
+        title(ui, "Process selection");
         ui.horizontal(|ui| {
             let w = (ui.available_width() - 90.0).max(60.0);
             ui.add(
@@ -1551,20 +1730,28 @@ impl BSDConqueror {
         let proc_h = 6.0 * (ui.text_style_height(&egui::TextStyle::Body) + 8.0);
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            let arrow = |c: usize| {
-                if self.sort_col == c {
-                    if self.sort_asc { " ▲" } else { " ▼" }
-                } else {
-                    ""
-                }
-            };
-            let h0 = format!("PID{}", arrow(0));
-            let h1 = format!("User{}", arrow(1));
-            let h2 = format!("Process{}", arrow(2));
             let (resp, rects) = draw_row(
-                ui, &pw, &[h0.as_str(), h1.as_str(), h2.as_str()], &[false; 3], false, false, true,
+                ui, &pw, &["PID", "User", "Process"], &[false; 3], false, false, true,
             );
             col_handles(ui, &rects, &mut self.col_proc, k, "proc");
+            // Seta de ordenação desenhada como triângulo (a fonte do egui não tem ▲/▼).
+            if let Some(r) = rects.get(self.sort_col) {
+                let (cx, cy, sz) = (r.right() - 14.0 * k, r.center().y, 4.0 * k);
+                let pts = if self.sort_asc {
+                    vec![
+                        egui::pos2(cx - sz, cy + sz * 0.6),
+                        egui::pos2(cx + sz, cy + sz * 0.6),
+                        egui::pos2(cx, cy - sz * 0.8),
+                    ]
+                } else {
+                    vec![
+                        egui::pos2(cx - sz, cy - sz * 0.6),
+                        egui::pos2(cx + sz, cy - sz * 0.6),
+                        egui::pos2(cx, cy + sz * 0.8),
+                    ]
+                };
+                ui.painter().add(egui::Shape::convex_polygon(pts, ACCENT, egui::Stroke::NONE));
+            }
             if resp.clicked() {
                 if let Some(pos) = resp.interact_pointer_pos() {
                     new_sort = rects.iter().position(|r| r.contains(pos));
@@ -1658,7 +1845,7 @@ impl BSDConqueror {
         // Botões centrados por cima da grelha.
         let k = self.ui_scale();
         let bw = 120.0 * k;
-        let total = bw * 3.0 + ui.spacing().item_spacing.x * 2.0;
+        let total = bw * 4.0 + ui.spacing().item_spacing.x * 3.0;
         ui.horizontal(|ui| {
             ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
             let b = egui::Button::image_and_text(
@@ -1675,7 +1862,18 @@ impl BSDConqueror {
             if ui.add_sized([bw, 26.0 * k], b).clicked() {
                 self.on_clear();
             }
-            if ui.add_sized([bw, 26.0 * k], egui::Button::new("Quit")).clicked() {
+            if ui
+                .add_sized([bw, 26.0 * k], egui::Button::new("Remove"))
+                .on_hover_text("Remove as linhas selecionadas (tecla Delete)")
+                .clicked()
+            {
+                self.remove_selected();
+            }
+            let b = egui::Button::image_and_text(
+                ico(ui, egui::include_image!("icons/quit-32x32.png")),
+                "Quit",
+            );
+            if ui.add_sized([bw, 26.0 * k], b).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
         });
@@ -1828,6 +2026,7 @@ impl eframe::App for BSDConqueror {
         self.handle_responses();
         self.handle_font_zoom(ctx);
         self.tick_locks();
+        self.tick_refresh();
         ctx.request_repaint_after(Duration::from_millis(100));
 
         if !ctx.wants_keyboard_input() {
@@ -1836,6 +2035,9 @@ impl eframe::App for BSDConqueror {
             }
             if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
                 self.begin_edit_cursor();
+            }
+            if ctx.input(|i| i.key_pressed(egui::Key::Delete)) {
+                self.remove_selected();
             }
         }
 
