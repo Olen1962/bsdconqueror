@@ -109,6 +109,7 @@ link_role unlock      changes-allow object-unlocked
 link_role app         utilities-system-monitor applications-system preferences-system
 link_role quit        application-exit window-close system-log-out
 link_role add         list-add list-add-symbolic go-next go-down
+link_role remove      list-remove edit-delete user-trash window-close
 
 echo
 echo "Ficheiros em $DEST:"

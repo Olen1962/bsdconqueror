@@ -1862,8 +1862,12 @@ impl BSDConqueror {
             if ui.add_sized([bw, 26.0 * k], b).clicked() {
                 self.on_clear();
             }
+            let b = egui::Button::image_and_text(
+                ico(ui, egui::include_image!("icons/remove-32x32.png")),
+                "Remove",
+            );
             if ui
-                .add_sized([bw, 26.0 * k], egui::Button::new("Remove"))
+                .add_sized([bw, 26.0 * k], b)
                 .on_hover_text("Remove as linhas selecionadas (tecla Delete)")
                 .clicked()
             {
