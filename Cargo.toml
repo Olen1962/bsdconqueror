@@ -1,6 +1,7 @@
 [package]
 name = "bsdconqueror"
 version = "0.20.0"
+license = "Unlicense"
 edition = "2024"
 
 # Se o teu Cargo.toml já tem eframe numa versão >= 0.29, mantém-na e põe o
