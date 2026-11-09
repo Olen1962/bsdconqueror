@@ -1,0 +1,289 @@
+\documentclass[11pt,a4paper]{article}
+
+% Compilação recomendada: pdflatex bsdconqueror.tex
+\usepackage[T1]{fontenc}
+\usepackage[utf8]{inputenc}
+\usepackage[portuguese]{babel}
+\usepackage{lmodern}
+\usepackage[a4paper,margin=2.5cm,headheight=15pt]{geometry}
+\usepackage{microtype}
+\usepackage{xcolor}
+\usepackage{enumitem}
+\usepackage{tabularx}
+\usepackage{booktabs}
+\usepackage{array}
+\usepackage{listings}
+\usepackage{fancyhdr}
+\usepackage{titlesec}
+\usepackage{hyperref}
+\usepackage{url}
+
+\definecolor{bsdblue}{HTML}{24476B}
+\definecolor{codebg}{HTML}{F3F5F7}
+\definecolor{codeframe}{HTML}{D7DEE5}
+\definecolor{muted}{HTML}{596675}
+
+\hypersetup{
+  colorlinks=true,
+  linkcolor=bsdblue,
+  urlcolor=bsdblue,
+  pdftitle={BSDConqueror — Pesquisador e editor de memória de processos},
+  pdfsubject={Documentação do BSDConqueror para FreeBSD},
+  pdfauthor={Projeto BSDConqueror}
+}
+
+\pagestyle{fancy}
+\fancyhf{}
+\lhead{\small\textsf{BSDConqueror}}
+\rhead{\small\textsf{Documentação do projeto}}
+\cfoot{\thepage}
+\renewcommand{\headrulewidth}{0.4pt}
+
+\titleformat{\section}{\Large\bfseries\color{bsdblue}}{\thesection}{0.7em}{}
+\titleformat{\subsection}{\large\bfseries\color{bsdblue}}{\thesubsection}{0.7em}{}
+\setlist[itemize]{leftmargin=1.5em,itemsep=0.25em,topsep=0.35em}
+\setlist[enumerate]{leftmargin=1.8em,itemsep=0.35em,topsep=0.4em}
+\renewcommand{\arraystretch}{1.2}
+
+\lstdefinestyle{terminal}{
+  basicstyle=\ttfamily\small,
+  backgroundcolor=\color{codebg},
+  frame=single,
+  rulecolor=\color{codeframe},
+  framerule=0.4pt,
+  xleftmargin=0.4em,
+  xrightmargin=0.4em,
+  aboveskip=0.8em,
+  belowskip=0.8em,
+  breaklines=true,
+  columns=fullflexible,
+  keepspaces=true,
+  showstringspaces=false
+}
+\lstset{style=terminal}
+
+\newcommand{\cmd}[1]{\texttt{\detokenize{#1}}}
+\newcommand{\key}[1]{\textsf{#1}}
+
+\begin{document}
+
+\begin{titlepage}
+  \centering
+  \vspace*{2.2cm}
+  {\Huge\bfseries\color{bsdblue} BSDConqueror\par}
+  \vspace{0.6cm}
+  {\LARGE Pesquisador e editor de memória de processos\par}
+  \vspace{0.25cm}
+  {\large Documentação do projeto para FreeBSD\par}
+  \vspace{1.4cm}
+  \rule{0.78\textwidth}{0.8pt}\par
+  \vspace{0.8cm}
+  {\large Interface gráfica em Rust, com egui/eframe\par}
+  \vspace{0.5cm}
+  {\normalsize Scanner baseado exclusivamente em ferramentas nativas do sistema\par}
+  \vfill
+  \begin{minipage}{0.82\textwidth}
+    \small
+    \textbf{Em poucas palavras.} O BSDConqueror permite localizar valores guardados na memória de processos e alterá-los ou mantê-los fixos. Foi escrito de raiz para FreeBSD e utiliza \cmd{ps}, \cmd{procstat} e \cmd{ptrace(2)}, sem depender do scanmem nem de outros programas externos.
+  \end{minipage}
+  \vfill
+  {\small Versão documentada: 0.20.0\par}
+  {\small \today\par}
+\end{titlepage}
+
+\tableofcontents
+\clearpage
+
+\section{Visão geral}
+
+O \textbf{BSDConqueror} é um pesquisador e editor de memória de processos para \textbf{FreeBSD}, com interface gráfica desenvolvida em Rust usando \textbf{egui/eframe}. Funciona apenas com ferramentas e mecanismos nativos do sistema: \cmd{ps}, \cmd{procstat} e \cmd{ptrace(2)}. Não necessita do \cmd{scanmem} nem de qualquer programa externo.
+
+O projeto é inspirado no GameConqueror/scanmem, mas foi escrito de raiz para FreeBSD. As versões anteriores à 0.20 utilizavam o scanmem; a última versão dessa linha está preservada na etiqueta Git \cmd{scanmem-final}.
+
+\begin{quote}\small\color{muted}
+  \textit{O objetivo é disponibilizar no FreeBSD uma ferramenta gráfica de pesquisa e edição de memória, recorrendo diretamente às capacidades do próprio sistema operativo.}
+\end{quote}
+
+\section{Finalidade e fluxo de utilização}
+
+A aplicação permite descobrir onde um programa guarda determinado valor -- por exemplo, vidas, moedas ou pontos -- e, posteriormente, alterar esse valor ou mantê-lo fixo (\textit{lock}/congelamento).
+
+O fluxo normal de utilização é o seguinte:
+\begin{enumerate}
+  \item Escolher o processo que se pretende analisar.
+  \item Pesquisar o valor conhecido.
+  \item Alterar esse valor no programa de destino e executar \key{Next Search}, para reduzir o conjunto de resultados.
+  \item Transferir os endereços encontrados para a lista inferior, onde podem ser editados ou fixados.
+\end{enumerate}
+
+\textbf{Utilização responsável:} utilizar apenas em programas próprios, como jogos de um jogador. Não utilizar em jogos online nem em programas pertencentes a terceiros.
+
+\section{Funcionalidades}
+
+\subsection{Processos e pesquisa}
+\begin{itemize}
+  \item Lista de processos com filtro e ordenação por coluna: PID, utilizador e nome.
+  \item Pesquisa de inteiros com larguras de 1, 2, 4 e 8 bytes. A opção predefinida é \key{2 e 4 Bytes}; existe também o modo \key{Auto}.
+  \item Pesquisa em todos os endereços, byte a byte, permitindo encontrar valores desalinhados -- uma situação comum em jogos DOS executados dentro de emuladores, como DOSBox e semelhantes.
+  \item Lista \key{Found} limitada aos primeiros 20 endereços distintos. Quando o mesmo endereço é encontrado com várias larguras, é apresentada apenas a largura mais estreita.
+\end{itemize}
+
+\subsection{Valores encontrados e lista de edição}
+\begin{itemize}
+  \item Os valores são atualizados em tempo real: a cada 1 segundo, ou a cada 0,3 segundos quando existem locks ativos.
+  \item A lista inferior reúne os endereços de interesse.
+  \item O valor pode ser editado com duplo clique ou através de \key{F2}; a descrição pode ser editada com duplo clique.
+  \item Quando estão selecionadas várias linhas, a alteração do valor e a ativação do lock aplicam-se a todas elas.
+  \item O cadeado (\key{Lock}) escreve continuamente o valor definido, mantendo-o fixo.
+  \item É possível remover as linhas selecionadas com \key{Delete}, selecionar tudo com \key{Ctrl+A} ou limpar a lista.
+\end{itemize}
+
+\subsection{Interface e preferências}
+\begin{itemize}
+  \item Zoom da interface através de \key{Ctrl} + roda do rato, ou dos atalhos \key{Ctrl +}, \key{Ctrl -} e \key{Ctrl 0}.
+  \item Preferências persistentes entre execuções: zoom, dimensões da janela, largura das colunas e dos painéis, e tamanho de valor selecionado.
+\end{itemize}
+
+\section{Requisitos}
+\begin{itemize}
+  \item FreeBSD (testado em versões 14.x).
+  \item \cmd{ps} e \cmd{procstat}, incluídos no sistema base do FreeBSD.
+  \item Ambiente gráfico X11 ou Wayland.
+  \item Rust recente; recomenda-se a versão 1.85 ou superior, com \cmd{cargo}.
+\end{itemize}
+
+\section{Compilação e execução}
+
+Obter o código-fonte, entrar no diretório do projeto e compilar em modo de lançamento:
+\begin{lstlisting}[language=bash]
+git clone git@github.com:Olen1962/bsdconqueror.git
+cd bsdconqueror
+cargo build --release
+./target/release/bsdconqueror
+\end{lstlisting}
+
+\textbf{Importante:} utilizar sempre \cmd{--release}. A pesquisa percorre a memória byte a byte e, em modo de depuração (\textit{debug}), é significativamente mais lenta.
+
+\section{Permissões}
+
+Para analisar processos do mesmo utilizador, não é necessário executar a aplicação como root, desde que o parâmetro \cmd{security.bsd.unprivileged_proc_debug} esteja definido como \cmd{1}, que é o valor por omissão no FreeBSD.
+
+Para analisar processos pertencentes a outros utilizadores (incluindo \cmd{root}), ou quando esse parâmetro está definido como \cmd{0}, é necessário executar o BSDConqueror como root.
+
+Se surgir uma mensagem semelhante a \cmd{PT_ATTACH falhou ... Operation not permitted}, deve verificar-se se as permissões necessárias estão disponíveis.
+
+\section{Funcionamento interno e implicações}
+
+O programa anexa-se temporariamente ao processo de destino através de \cmd{ptrace}, usando \cmd{PT_ATTACH}. A leitura e a escrita da memória são efetuadas com \cmd{PT_IO}; em seguida, o processo é imediatamente desanexado.
+
+\subsection{Pausas do processo de destino}
+\begin{itemize}
+  \item Enquanto está anexado, o processo de destino fica parado. A primeira pesquisa pode demorar vários segundos e, durante esse período, o programa analisado fica congelado.
+  \item Com locks ativos, ocorre uma pausa muito curta a cada 0,3 segundos.
+\end{itemize}
+
+\subsection{Cuidados ao editar memória}
+\begin{itemize}
+  \item Alterar a memória de um programa pode provocar comportamento inesperado ou danificar os dados. Recomenda-se fazer cópias de segurança dos ficheiros de gravação (\textit{saves}).
+  \item Escrever 4 bytes num valor que ocupa apenas 2 bytes também altera os 2 bytes seguintes, que podem pertencer a outra variável. Em caso de dúvida, deve utilizar-se a opção de 2 bytes.
+\end{itemize}
+
+\section{Atalhos de teclado}
+
+\begin{center}
+\begin{tabularx}{0.88\textwidth}{>{\raggedright\arraybackslash}X >{\raggedright\arraybackslash}p{0.30\textwidth}}
+\toprule
+\textbf{Ação} & \textbf{Atalho} \\
+\midrule
+Pesquisar (na caixa Value) & \key{Enter} \\
+Editar o valor de uma linha & Duplo clique em Value ou \key{F2} \\
+Editar a descrição & Duplo clique em Description \\
+Selecionar tudo na lista inferior & \key{Ctrl+A} \\
+Remover linhas selecionadas & \key{Delete} \\
+Desselecionar & \key{Esc} \\
+Alterar o zoom & \key{Ctrl} + roda do rato \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Preferências e configuração}
+
+As preferências são guardadas no ficheiro:
+\begin{lstlisting}
+~/.config/bsdconqueror/config.ini
+\end{lstlisting}
+
+Se a variável de ambiente \cmd{XDG_CONFIG_HOME} estiver definida, a configuração é guardada no diretório correspondente, dentro de \cmd{bsdconqueror/}. O ficheiro é texto simples. Para repor os valores por omissão, basta apagá-lo.
+
+\section{Limitações conhecidas}
+\begin{itemize}
+  \item Apenas são suportados valores inteiros; não existe ainda suporte para \cmd{float} ou \cmd{double}.
+  \item Valores de 1 byte entre 128 e 255 são apresentados como negativos.
+  \item O número máximo de endereços candidatos por pesquisa é de 16 milhões.
+  \item Apenas são percorridas regiões de memória com permissões de leitura e escrita; dispositivos e \textit{guard pages} ficam excluídos.
+  \item Não existe pesquisa de ponteiros nem pesquisa de valores desconhecidos.
+\end{itemize}
+
+\section{Estrutura do projeto}
+
+A organização atual do código-fonte é a seguinte:
+\begin{lstlisting}
+src/
+|-- main.rs          ponto de entrada
+|-- core/
+|   `-- scanner.rs   ptrace, procstat, pesquisa e escrita de memória
+|-- ui/
+|   `-- mod.rs       interface gráfica (egui)
+`-- icons/           ícones PNG embebidos no executável
+
+link_icons.sh        (opcional): copia ícones de um tema do sistema
+                     para src/icons
+\end{lstlisting}
+
+A interface gráfica não bloqueia durante as operações de pesquisa: o scanner é executado numa thread própria e comunica com a interface através de canais.
+
+\section{Próximos passos}
+
+As funcionalidades planeadas para desenvolvimento futuro são:
+\begin{itemize}
+  \item Desfazer (\textit{rollback}) a última pesquisa.
+  \item Adicionar menus: Ficheiro, Ver e Ajuda.
+  \item Implementar traduções através de ficheiros \cmd{.po}.
+  \item Adicionar pesquisa de valores \cmd{float} e \cmd{double}.
+\end{itemize}
+
+\section{Histórico de versões}
+
+\begin{center}
+\begin{tabularx}{0.88\textwidth}{>{\raggedright\arraybackslash}p{0.20\textwidth} X}
+\toprule
+\textbf{Versão} & \textbf{Descrição} \\
+\midrule
+0.20.0 & Scanner nativo baseado em \cmd{ptrace}/\cmd{procstat}, sem dependência do scanmem. \\
+0.12.x & Linha de versões que utilizava o scanmem; última versão preservada na etiqueta \cmd{scanmem-final}. \\
+\bottomrule
+\end{tabularx}
+\end{center}
+
+\section{Licença e condições de utilização}
+
+O projeto é disponibilizado sob a licença \textbf{Unlicense}, sendo declarado de domínio público. Nos termos indicados pelo projeto, qualquer pessoa pode copiar, editar, modificar, compilar, publicar, vender ou distribuir o código, para fins comerciais ou não comerciais. Não é obrigatório atribuir créditos ao autor ou ao projeto.
+
+O programa é fornecido \textbf{sem qualquer garantia}, expressa ou implícita, e no estado em que se encontra (\textit{as is}). Os autores não assumem responsabilidade por danos ou perdas decorrentes da sua utilização, incluindo perda de dados ou de ficheiros de gravação.
+
+\subsection{Exceções}
+
+Mantêm as respetivas licenças:
+\begin{itemize}
+  \item As bibliotecas utilizadas, incluindo egui/eframe e outras dependências obtidas através de \cmd{cargo}.
+  \item Os ícones incluídos em \cmd{src/icons}, provenientes de temas de ícones do sistema e do GameConqueror. Para que todos os elementos distribuídos pelo projeto sejam livres de dependências desses recursos, os ícones podem ser substituídos por ícones próprios.
+\end{itemize}
+
+\vfill
+\begin{center}
+  \small\color{muted}
+  BSDConqueror --- documentação do projeto\\
+  \url{https://github.com/Olen1962/bsdconqueror}
+\end{center}
+
+\end{document}

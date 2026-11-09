@@ -111,8 +111,9 @@ src/
 │   └── scanner.rs   ptrace, procstat, pesquisa e escrita de memória
 ├── ui/
 │   └── mod.rs       interface (egui)
-└── icons/           ícones PNG embebidos no executável
-link_icons.sh        (opcional) copia ícones de um tema do sistema para src/icons
+└── icons/           ícones PNG embebidos no executável (e svg/ com os originais)
+tools/
+└── make_icons.py    gera os ícones (PNG e SVG); precisa de Python 3 e Pillow
 ```
 
 A interface não bloqueia: o scanner corre numa thread própria e comunica por canais.
@@ -133,16 +134,15 @@ A interface não bloqueia: o scanner corre numa thread própria e comunica por c
 
 ## Licença
 
-**Uso 100% livre.** Este projeto é de **domínio público** (licença [Unlicense](LICENSE)):
+**Uso 100% livre.** O trabalho original deste projeto (código, ícones e documentação) é de
+**domínio público** (licença [Unlicense](LICENSE)):
 
-- qualquer pessoa pode copiar, editar, alterar, compilar, publicar, vender ou distribuir o código,
+- qualquer pessoa pode copiar, editar, alterar, compilar, publicar, vender ou distribuir,
   para qualquer fim, comercial ou não;
-- **não é preciso referir créditos**, nem o autor, nem este projeto;
+- **não é preciso referir créditos**;
 - **sem garantias** de qualquer tipo: o programa é fornecido "tal como está" e os autores não
   respondem por quaisquer danos, incluindo perda de dados ou de saves.
 
-Exceções, que mantêm as suas próprias licenças:
-
-- as bibliotecas usadas (egui/eframe e outras), que se obtêm com o `cargo`;
-- os ícones em `src/icons`, que vêm de temas de ícones do sistema e do GameConqueror. Para o
-  projeto ficar totalmente livre, podem ser substituídos por ícones próprios.
+Tudo o que seja de terceiros mantém os direitos e as licenças de origem, sejam adquiridos,
+herdados ou de qualquer outra natureza. É o caso das bibliotecas obtidas com o `cargo`
+(egui/eframe e outras), que não fazem parte deste trabalho e têm as suas próprias licenças.

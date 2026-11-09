@@ -1,0 +1,92 @@
+# Molde de traduções do BSDConqueror (gerado por tools/extract_po.py).
+msgid ""
+msgstr ""
+"Project-Id-Version: BSDConqueror\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/ui/mod.rs:1634
+msgid "File"
+msgstr ""
+
+#: src/ui/mod.rs:1636
+msgid "Refresh processes"
+msgstr ""
+
+#: src/ui/mod.rs:1643
+msgid "Quit"
+msgstr ""
+
+#: src/ui/mod.rs:1648
+msgid "Search"
+msgstr ""
+
+#: src/ui/mod.rs:1649
+msgid "Reset search"
+msgstr ""
+
+#: src/ui/mod.rs:1654
+msgid "List"
+msgstr ""
+
+#: src/ui/mod.rs:1656
+msgid "Select all"
+msgstr ""
+
+#: src/ui/mod.rs:1663
+msgid "Remove selected"
+msgstr ""
+
+#: src/ui/mod.rs:1670
+msgid "Clear list"
+msgstr ""
+
+#: src/ui/mod.rs:1675
+msgid "View"
+msgstr ""
+
+#: src/ui/mod.rs:1676
+msgid "Zoom in"
+msgstr ""
+
+#: src/ui/mod.rs:1679
+msgid "Zoom out"
+msgstr ""
+
+#: src/ui/mod.rs:1682
+msgid "Reset zoom"
+msgstr ""
+
+#: src/ui/mod.rs:1687
+msgid "Language"
+msgstr ""
+
+#: src/ui/mod.rs:1695
+msgid "Help"
+msgstr ""
+
+#: src/ui/mod.rs:1696
+#: src/ui/mod.rs:1725
+msgid "About BSDConqueror"
+msgstr ""
+
+#: src/ui/mod.rs:1716
+msgid "(unavailable)"
+msgstr ""
+
+#: src/ui/mod.rs:1720
+msgid "Memory scanner and editor for FreeBSD."
+msgstr ""
+
+#: src/ui/mod.rs:1721
+msgid "Uses only native system tools: ptrace, procstat and ps."
+msgstr ""
+
+#: src/ui/mod.rs:1722
+msgid "Public domain (Unlicense): free to use, no warranty."
+msgstr ""
+
+#: src/ui/mod.rs:1723
+msgid "Preferences: {}"
+msgstr ""

@@ -229,16 +229,16 @@ enum Icon {
 /// Ícone embebido (src/icons), com tamanho proporcional à letra atual.
 fn ico(ui: &egui::Ui, icon: Icon) -> egui::Image<'static> {
     let src = match icon {
-        Icon::Refresh => egui::include_image!("../icons/refresh-32x32.png"),
-        Icon::Search => egui::include_image!("../icons/search-32x32.png"),
-        Icon::Reset => egui::include_image!("../icons/reset-32x32.png"),
-        Icon::SelectAll => egui::include_image!("../icons/select_all-32x32.png"),
-        Icon::Clear => egui::include_image!("../icons/clear-32x32.png"),
-        Icon::Remove => egui::include_image!("../icons/remove-32x32.png"),
-        Icon::Quit => egui::include_image!("../icons/quit-32x32.png"),
-        Icon::Add => egui::include_image!("../icons/add-32x32.png"),
-        Icon::Lock => egui::include_image!("../icons/lock-32x32.png"),
-        Icon::Unlock => egui::include_image!("../icons/unlock-32x32.png"),
+        Icon::Refresh => egui::include_image!("../icons/refresh-48x48.png"),
+        Icon::Search => egui::include_image!("../icons/search-48x48.png"),
+        Icon::Reset => egui::include_image!("../icons/reset-48x48.png"),
+        Icon::SelectAll => egui::include_image!("../icons/select_all-48x48.png"),
+        Icon::Clear => egui::include_image!("../icons/clear-48x48.png"),
+        Icon::Remove => egui::include_image!("../icons/remove-48x48.png"),
+        Icon::Quit => egui::include_image!("../icons/quit-48x48.png"),
+        Icon::Add => egui::include_image!("../icons/add-48x48.png"),
+        Icon::Lock => egui::include_image!("../icons/lock-48x48.png"),
+        Icon::Unlock => egui::include_image!("../icons/unlock-48x48.png"),
     };
     let sz = ui.text_style_height(&egui::TextStyle::Body) * 1.2;
     egui::Image::new(src).fit_to_exact_size(egui::vec2(sz, sz))
@@ -574,7 +574,7 @@ impl BSDConquerorApp {
         });
 
         // Ícone da janela.
-        if let Ok(img) = image::load_from_memory(include_bytes!("../icons/GameConqueror.png")) {
+        if let Ok(img) = image::load_from_memory(include_bytes!("../icons/app-128x128.png")) {
             let rgba = img.to_rgba8();
             ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(Arc::new(egui::IconData {
                 width: rgba.width(),
@@ -1601,6 +1601,115 @@ impl BSDConquerorApp {
         }
     }
 
+    /// Barra de menus (File, Search, List, View, Help).
+    fn ui_menu(&mut self, ctx: &egui::Context) {
+        #[derive(Clone, Copy)]
+        enum Act {
+            Refresh,
+            Quit,
+            Reset,
+            SelectAll,
+            Remove,
+            Clear,
+            ZoomIn,
+            ZoomOut,
+            ZoomReset,
+            About,
+        }
+        let mut act: Option<Act> = None;
+        egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
+            egui::menu::bar(ui, |ui| {
+                ui.menu_button("File", |ui| {
+                    if ui
+                        .add(egui::Button::new("Refresh processes").shortcut_text("F5"))
+                        .clicked()
+                    {
+                        act = Some(Act::Refresh);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.add(egui::Button::new("Quit").shortcut_text("Ctrl+Q")).clicked() {
+                        act = Some(Act::Quit);
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("Search", |ui| {
+                    if ui.button("Reset search").clicked() {
+                        act = Some(Act::Reset);
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("List", |ui| {
+                    if ui
+                        .add(egui::Button::new("Select all").shortcut_text("Ctrl+A"))
+                        .clicked()
+                    {
+                        act = Some(Act::SelectAll);
+                        ui.close_menu();
+                    }
+                    if ui
+                        .add(egui::Button::new("Remove selected").shortcut_text("Del"))
+                        .clicked()
+                    {
+                        act = Some(Act::Remove);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button("Clear list").clicked() {
+                        act = Some(Act::Clear);
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("View", |ui| {
+                    if ui.add(egui::Button::new("Zoom in").shortcut_text("Ctrl +")).clicked() {
+                        act = Some(Act::ZoomIn);
+                    }
+                    if ui.add(egui::Button::new("Zoom out").shortcut_text("Ctrl -")).clicked() {
+                        act = Some(Act::ZoomOut);
+                    }
+                    if ui.add(egui::Button::new("Reset zoom").shortcut_text("Ctrl 0")).clicked() {
+                        act = Some(Act::ZoomReset);
+                        ui.close_menu();
+                    }
+                });
+                ui.menu_button("Help", |ui| {
+                    if ui.button("About BSDConqueror").clicked() {
+                        act = Some(Act::About);
+                        ui.close_menu();
+                    }
+                });
+            });
+        });
+        match act {
+            Some(Act::Refresh) => self.refresh_processes(),
+            Some(Act::Quit) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
+            Some(Act::Reset) => self.on_reset(),
+            Some(Act::SelectAll) => self.select_all(),
+            Some(Act::Remove) => self.remove_selected(),
+            Some(Act::Clear) => self.on_clear(),
+            Some(Act::ZoomIn) => ctx.set_zoom_factor((ctx.zoom_factor() * 1.1).clamp(0.7, 3.0)),
+            Some(Act::ZoomOut) => ctx.set_zoom_factor((ctx.zoom_factor() / 1.1).clamp(0.7, 3.0)),
+            Some(Act::ZoomReset) => ctx.set_zoom_factor(1.0),
+            Some(Act::About) => {
+                let cfg = Prefs::path()
+                    .map(|p| p.display().to_string())
+                    .unwrap_or_else(|| "(indisponível)".to_string());
+                self.show_alert(
+                    "Sobre o BSDConqueror",
+                    format!(
+                        "BSDConqueror {}\n\nPesquisador e editor de memória para FreeBSD.\n\
+                         Usa só ferramentas nativas do sistema: ptrace, procstat e ps.\n\n\
+                         Domínio público (Unlicense): uso livre, sem garantias.\n\n\
+                         Preferências: {}",
+                        env!("CARGO_PKG_VERSION"),
+                        cfg
+                    ),
+                );
+            }
+            None => {}
+        }
+    }
+
     /// Janela de aviso/erro (não altera o estilo global).
     fn show_popup(&mut self, ctx: &egui::Context) {
         let Some(p) = self.popup.as_ref() else { return };
@@ -1682,6 +1791,13 @@ impl eframe::App for BSDConquerorApp {
         self.tick_sync();
         ctx.request_repaint_after(Duration::from_millis(100));
 
+        if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Q)) {
+            ctx.send_viewport_cmd(egui::ViewportCommand::Close);
+        }
+        if ctx.input(|i| i.key_pressed(egui::Key::F5)) {
+            self.refresh_processes();
+        }
+
         if self.popup.is_none() && !ctx.wants_keyboard_input() {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::A)) {
                 self.select_all();
@@ -1702,6 +1818,8 @@ impl eframe::App for BSDConquerorApp {
                 ui.label(self.status.as_str());
             });
         });
+
+        self.ui_menu(ctx);
 
         let top = egui::TopBottomPanel::top("upper_panel")
             .resizable(true)

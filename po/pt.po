@@ -1,0 +1,77 @@
+# Tradução para português do BSDConqueror.
+# Domínio público: usa, altera e distribui como quiseres.
+#
+# Como funciona: cada "msgid" é a frase em inglês que está no código;
+# o "msgstr" é a tradução. Se o msgstr ficar vazio, o programa mostra o inglês.
+msgid ""
+msgstr ""
+"Project-Id-Version: BSDConqueror\n"
+"Language: pt\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+# ── Menu ──
+msgid "File"
+msgstr "Ficheiro"
+
+msgid "Refresh processes"
+msgstr "Atualizar processos"
+
+msgid "Quit"
+msgstr "Sair"
+
+msgid "Search"
+msgstr "Pesquisar"
+
+msgid "Reset search"
+msgstr "Repor pesquisa"
+
+msgid "List"
+msgstr "Lista"
+
+msgid "Select all"
+msgstr "Selecionar tudo"
+
+msgid "Remove selected"
+msgstr "Remover selecionadas"
+
+msgid "Clear list"
+msgstr "Limpar lista"
+
+msgid "View"
+msgstr "Ver"
+
+msgid "Zoom in"
+msgstr "Aumentar"
+
+msgid "Zoom out"
+msgstr "Diminuir"
+
+msgid "Reset zoom"
+msgstr "Repor zoom"
+
+msgid "Language"
+msgstr "Idioma"
+
+msgid "Help"
+msgstr "Ajuda"
+
+# ── Sobre ──
+msgid "About BSDConqueror"
+msgstr "Sobre o BSDConqueror"
+
+msgid "Memory scanner and editor for FreeBSD."
+msgstr "Pesquisador e editor de memória para FreeBSD."
+
+msgid "Uses only native system tools: ptrace, procstat and ps."
+msgstr "Usa só ferramentas nativas do sistema: ptrace, procstat e ps."
+
+msgid "Public domain (Unlicense): free to use, no warranty."
+msgstr "Domínio público (Unlicense): uso livre, sem garantias."
+
+msgid "Preferences: {}"
+msgstr "Preferências: {}"
+
+msgid "(unavailable)"
+msgstr "(indisponível)"
