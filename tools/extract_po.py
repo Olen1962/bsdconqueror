@@ -19,8 +19,8 @@ import re
 ROOT = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
 PO_DIR = os.path.join(ROOT, "po")
 
-# tr("...") ou trf("...") -> apanha o texto entre aspas (com escapes do Rust: \n, \", \\)
-CALL = re.compile(r'\btrf?\(\s*"((?:[^"\\]|\\.)*)"')
+# tr("..."), trf("...") ou n_("...") -> apanha o texto entre aspas (com escapes do Rust: \n, \", \\)
+CALL = re.compile(r'\b(?:trf?|n_)\(\s*"((?:[^"\\]|\\.)*)"')
 
 HEADER = (
     'msgid ""\n'

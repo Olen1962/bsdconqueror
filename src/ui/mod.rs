@@ -9,6 +9,7 @@
 //! por isso a janela nunca bloqueia durante uma pesquisa longa.
 
 use crate::core::scanner::{self, MemoryScanner, ProcessInfo, ScanResult};
+use crate::i18n::{self, n_, tr, trf};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
@@ -26,12 +27,12 @@ const UI_SCALE: f32 = (12.5 + FONT_BONUS) / 12.5;
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(20, 60, 130);
 
 const SCAN_NAMES: [&str; 6] = [
-    "2 e 4 Bytes",
-    "1 Byte",
-    "2 Bytes",
-    "4 Bytes",
-    "8 Bytes",
-    "Auto (1, 2, 4 e 8)",
+    n_("2 and 4 Bytes"),
+    n_("1 Byte"),
+    n_("2 Bytes"),
+    n_("4 Bytes"),
+    n_("8 Bytes"),
+    n_("Auto (1, 2, 4 and 8)"),
 ];
 
 fn scan_widths(idx: usize) -> &'static [usize] {
@@ -81,10 +82,12 @@ fn parse_int(raw: &str) -> Option<i64> {
 }
 
 fn kind_name(width: usize) -> String {
-    if width == 1 {
-        "1 Byte".to_string()
-    } else {
-        format!("{} Bytes", width)
+    match width {
+        1 => tr("1 Byte"),
+        2 => tr("2 Bytes"),
+        4 => tr("4 Bytes"),
+        8 => tr("8 Bytes"),
+        w => format!("{} Bytes", w),
     }
 }
 
@@ -103,6 +106,7 @@ struct Prefs {
     left_w: f32,
     top_h: f32,
     scan_kind: usize,
+    lang: String,
 }
 
 impl Default for Prefs {
@@ -116,6 +120,7 @@ impl Default for Prefs {
             left_w: 340.0,
             top_h: 370.0,
             scan_kind: 0,
+            lang: i18n::system_language(),
         }
     }
 }
@@ -159,6 +164,11 @@ impl Prefs {
                 }
                 "left_w" if nums.len() == 1 => p.left_w = nums[0].clamp(150.0, 2000.0),
                 "top_h" if nums.len() == 1 => p.top_h = nums[0].clamp(150.0, 2000.0),
+                "lang" => {
+                    if i18n::LANGUAGES.iter().any(|(c, _)| *c == v) {
+                        p.lang = v.to_string();
+                    }
+                }
                 "scan_kind" if nums.len() == 1 => {
                     let i = nums[0] as usize;
                     if i < SCAN_NAMES.len() {
@@ -187,6 +197,7 @@ impl Prefs {
         t.push_str(&format!("left_w={:.0}\n", self.left_w));
         t.push_str(&format!("top_h={:.0}\n", self.top_h));
         t.push_str(&format!("scan_kind={}\n", self.scan_kind));
+        t.push_str(&format!("lang={}\n", self.lang));
         t
     }
 
@@ -497,7 +508,7 @@ pub struct BSDConquerorApp {
     sort_col: usize,
     sort_asc: bool,
     selected_pid: Option<i32>,
-    selected_text: String,
+    selected_info: Option<(String, i32, String)>,
 
     // worker
     req_tx: Sender<Req>,
@@ -553,6 +564,7 @@ pub struct BSDConquerorApp {
 impl BSDConquerorApp {
     pub fn new(cc: &eframe::CreationContext<'_>) -> Self {
         let prefs = Prefs::load();
+        i18n::set_language(&prefs.lang);
         let ctx = &cc.egui_ctx;
         ctx.set_visuals(egui::Visuals::light());
         egui_extras::install_image_loaders(ctx);
@@ -598,7 +610,7 @@ impl BSDConquerorApp {
             sort_col: 2,
             sort_asc: true,
             selected_pid: None,
-            selected_text: "No process selected".into(),
+            selected_info: None,
             req_tx,
             resp_rx,
             worker: Some(worker),
@@ -625,7 +637,7 @@ impl BSDConquerorApp {
             cursor: None,
             anchor: None,
             editing: None,
-            status: "Selecione um processo, escreva um valor e pesquise (processos de outros utilizadores requerem root).".into(),
+            status: tr("Select a process, type a value and search (processes of other users require root)."),
             popup: None,
             col_results: prefs.col_results,
             col_found: prefs.col_found,
@@ -685,6 +697,7 @@ impl BSDConquerorApp {
             left_w: self.left_w,
             top_h: self.top_h,
             scan_kind: self.scan_kind,
+            lang: i18n::language(),
         };
         if self.last_prefs_check.elapsed() >= Duration::from_secs(1) {
             self.last_prefs_check = Instant::now();
@@ -723,10 +736,10 @@ impl BSDConquerorApp {
         if let Some(pid) = self.selected_pid {
             if !self.processes.iter().any(|p| p.pid == pid) {
                 self.selected_pid = None;
-                self.selected_text = "No process selected".into();
+                self.selected_info = None;
             }
         }
-        self.status = format!("{} processos listados.", self.processes.len());
+        self.status = trf("{} processes listed.", &[&self.processes.len()]);
     }
 
     fn on_process_selected(&mut self, p: &ProcessInfo) {
@@ -742,11 +755,8 @@ impl BSDConquerorApp {
         self.sync_fails = 0;
         self.selected_pid = Some(p.pid);
         self.focus_value_once = true;
-        self.selected_text = format!(
-            "Selected: {}  |  PID: {}  |  User: {}",
-            p.command, p.pid, p.user
-        );
-        self.status = format!("Processo selecionado: {} (PID {}).", p.command, p.pid);
+        self.selected_info = Some((p.command.clone(), p.pid, p.user.clone()));
+        self.status = trf("Process selected: {} (PID {}).", &[&p.command, &p.pid]);
     }
 
     // ── pesquisa ──
@@ -756,26 +766,29 @@ impl BSDConquerorApp {
             return;
         }
         let Some(pid) = self.selected_pid else {
-            self.show_alert("BSDConqueror - Erro", "Selecione primeiro um processo na lista!");
+            self.show_alert(tr("BSDConqueror - Error"), tr("Select a process in the list first!"));
             return;
         };
         let raw = self.value_input.trim().to_string();
         if raw.is_empty() {
-            self.status = "Escreva um valor inteiro para pesquisar.".into();
+            self.status = tr("Type an integer value to search for.");
             return;
         }
         let Some(value) = parse_int(&raw) else {
-            self.show_alert("BSDConqueror - Entrada Inválida", "Insira um valor inteiro válido para a pesquisa!");
+            self.show_alert(
+                tr("BSDConqueror - Invalid input"),
+                tr("Enter a valid integer value to search for!"),
+            );
             return;
         };
         let first = !(self.scan_has_results && self.scan_pid == Some(pid));
-        let mode = if first { "Search" } else { "Next Search" };
+        let mode = if first { tr("Search") } else { tr("Next Search") };
         self.sync_fails = 0;
         self.searching = true;
         self.status = if self.scan_kind == SCAN_NAMES.len() - 1 {
-            format!("{}: PID {}, valor {}… (modo Auto: pode demorar bastante)", mode, pid, value)
+            trf("{}: PID {}, value {}… (Auto mode: may take a long time)", &[&mode, &pid, &value])
         } else {
-            format!("{}: PID {}, valor {}… (o processo fica parado durante a pesquisa)", mode, pid, value)
+            trf("{}: PID {}, value {}… (the process is paused during the search)", &[&mode, &pid, &value])
         };
         if first {
             self.clear_found_view();
@@ -801,18 +814,16 @@ impl BSDConquerorApp {
     }
 
     fn finish_scan(&mut self, pid: i32, value: i64, first: bool, result: Result<ScanOut, String>) {
-        let mode = if first { "Search" } else { "Next Search" };
+        let mode = if first { tr("Search") } else { tr("Next Search") };
         match result {
             Ok(out) => {
                 let r = out.result;
                 if r.kept_previous {
                     // Nenhum candidato com este valor: os anteriores mantêm-se.
                     let sample: Vec<String> = r.sample.iter().map(|v| v.to_string()).collect();
-                    self.status = format!(
-                        "Nenhum dos {} endereços tem o valor {}. Valores atuais (amostra): {}.",
-                        out.prev_count,
-                        value,
-                        sample.join(", ")
+                    self.status = trf(
+                        "None of the {} addresses has the value {}. Current values (sample): {}.",
+                        &[&out.prev_count, &value, &sample.join(", ")],
                     );
                     self.sync_now = true;
                     return;
@@ -830,22 +841,23 @@ impl BSDConquerorApp {
                 self.found_total = r.total;
                 self.scan_has_results = r.total > 0;
                 self.scan_pid = if r.total > 0 { Some(pid) } else { None };
-                let trunc = if r.truncated { " (limite atingido: resultados parciais)" } else { "" };
-                self.status = if r.total == 0 {
-                    format!("{}: nenhum endereço com o valor {}.", mode, value)
+                let trunc = if r.truncated {
+                    format!(" {}", tr("(limit reached: partial results)"))
                 } else {
-                    format!(
-                        "{}: {} endereços (a mostrar {}).{}",
-                        mode,
-                        r.total,
-                        r.shown.len(),
-                        trunc
+                    String::new()
+                };
+                self.status = if r.total == 0 {
+                    trf("{}: no address with the value {}.", &[&mode, &value])
+                } else {
+                    trf(
+                        "{}: {} addresses (showing {}).{}",
+                        &[&mode, &r.total, &r.shown.len(), &trunc],
                     )
                 };
                 self.sync_now = true;
             }
             Err(e) => {
-                self.show_alert("BSDConqueror - Erro de Execução", format!("Erro: {}", e));
+                self.show_alert(tr("BSDConqueror - Execution error"), trf("Error: {}", &[&e]));
             }
         }
     }
@@ -863,11 +875,11 @@ impl BSDConquerorApp {
             return;
         }
         let Some(pid) = self.selected_pid else {
-            self.status = "Seleciona um processo antes de editar valores.".into();
+            self.status = tr("Select a process before editing values.");
             return;
         };
         let Some(value) = parse_int(&text) else {
-            self.status = "Valor inteiro inválido.".into();
+            self.status = tr("Invalid integer value.");
             return;
         };
         let targets: Vec<usize> = if self.selected_rows.contains(&row) && self.selected_rows.len() > 1 {
@@ -894,7 +906,7 @@ impl BSDConquerorApp {
                 value,
             })
             .collect();
-        self.status = format!("A escrever {} em {} endereço(s)…", value, items.len());
+        self.status = trf("Writing {} to {} address(es)…", &[&value, &items.len()]);
         let gid = self.generation;
         self.send_job(Req::Write { gid, rows, pid, items });
     }
@@ -927,14 +939,17 @@ impl BSDConquerorApp {
         self.sync_now = true;
         if let Some(e) = first_err {
             self.show_alert(
-                "BSDConqueror - Erro de Escrita",
-                format!("{} de {} escritas falharam.\n\n{}", total - ok, total, e),
+                tr("BSDConqueror - Write error"),
+                trf("{} of {} writes failed.\n\n{}", &[&(total - ok), &total, &e]),
             );
             return;
         }
         self.status = match (total, last_ok) {
-            (1, Some(((addr, _), v))) => format!("Valor de 0x{:x} alterado para {}.", addr, v),
-            (_, Some((_, v))) => format!("Valor {} escrito em {} endereço(s).", v, ok),
+            (1, Some(((addr, _), v))) => {
+                let a = format!("0x{:x}", addr);
+                trf("Value at {} changed to {}.", &[&a, &v])
+            }
+            (_, Some((_, v))) => trf("Value {} written to {} address(es).", &[&v, &ok]),
             _ => String::new(),
         };
     }
@@ -965,17 +980,17 @@ impl BSDConquerorApp {
                             self.sync_fails = 0;
                             self.apply_reads(&out.reads);
                             if let Some(e) = out.write_error {
-                                self.status = format!("Erro ao fixar valor: {}", e);
+                                self.status = trf("Error locking value: {}", &[&e]);
                             }
                         }
                         Err(e) => {
                             self.sync_fails = self.sync_fails.saturating_add(1);
-                            self.status = format!("Erro de acesso ao processo: {}", e);
+                            self.status = trf("Error accessing the process: {}", &[&e]);
                             if self.sync_fails >= 3 {
                                 self.clear_locks(false);
-                                self.status = format!(
-                                    "Erro de acesso ao processo: {} — atualização e locks desativados.",
-                                    e
+                                self.status = trf(
+                                    "Error accessing the process: {} — updates and locks disabled.",
+                                    &[&e],
                                 );
                             }
                         }
@@ -1073,18 +1088,20 @@ impl BSDConquerorApp {
                     Some(v) => {
                         row.locked = true;
                         self.locked.insert(key, v);
-                        last_msg = format!("Lock ativo: 0x{:x} = {}", key.0, v);
+                        let a = format!("0x{:x}", key.0);
+                        last_msg = trf("Lock on: {} = {}", &[&a, &v]);
                         done += 1;
                     }
                     None => {
-                        last_msg = format!("Não é possível fixar o valor '{}'.", row.value.trim());
+                        last_msg = trf("Cannot lock the value '{}'.", &[&row.value.trim()]);
                         bad += 1;
                     }
                 }
             } else {
                 row.locked = false;
                 self.locked.remove(&key);
-                last_msg = format!("Lock desativado: 0x{:x}", key.0);
+                let a = format!("0x{:x}", key.0);
+                last_msg = trf("Lock off: {}", &[&a]);
                 done += 1;
             }
         }
@@ -1092,13 +1109,14 @@ impl BSDConquerorApp {
         self.status = if targets.len() == 1 {
             last_msg
         } else if lock {
-            format!(
-                "Lock ativo em {} endereço(s){}.",
-                done,
-                if bad > 0 { format!("; {} sem valor válido", bad) } else { String::new() }
-            )
+            let extra = if bad > 0 {
+                format!("; {}", trf("{} without a valid value", &[&bad]))
+            } else {
+                String::new()
+            };
+            trf("Lock on for {} address(es){}.", &[&done, &extra])
         } else {
-            format!("Lock desativado em {} endereço(s).", done)
+            trf("Lock off for {} address(es).", &[&done])
         };
     }
 
@@ -1108,7 +1126,7 @@ impl BSDConquerorApp {
             r.locked = false;
         }
         if update_status {
-            self.status = "Todos os locks foram desativados.".into();
+            self.status = tr("All locks were turned off.");
         }
     }
 
@@ -1124,13 +1142,13 @@ impl BSDConquerorApp {
         self.found_total = 0;
         self.value_input.clear();
         self.focus_value_once = true;
-        self.status = "Pesquisa reiniciada.".into();
+        self.status = tr("Search reset.");
     }
 
     fn on_clear(&mut self) {
         self.clear_locks(false);
         self.clear_work_list();
-        self.status = "Lista de baixo limpa.".into();
+        self.status = tr("Lower list cleared.");
     }
 
     // ── seleção / edição de linhas ──
@@ -1165,15 +1183,15 @@ impl BSDConquerorApp {
                 continue;
             }
             let mut row = r.clone();
-            row.description = "Sem descrição".to_string();
+            row.description = tr("No description");
             row.locked = self.locked.contains_key(&row.key());
             self.result_rows.push(row);
             added += 1;
         }
         self.status = if dup > 0 {
-            format!("{} endereço(s) adicionado(s); {} já estavam na lista.", added, dup)
+            trf("{} address(es) added; {} were already in the list.", &[&added, &dup])
         } else {
-            format!("{} endereço(s) adicionado(s) à lista de baixo.", added)
+            trf("{} address(es) added to the lower list.", &[&added])
         };
     }
 
@@ -1181,7 +1199,7 @@ impl BSDConquerorApp {
         let mut idx: Vec<usize> = self.found_selected.iter().copied().collect();
         idx.sort_unstable();
         if idx.is_empty() {
-            self.status = "Seleciona primeiro linhas na lista Found (Ctrl/Shift para várias).".into();
+            self.status = tr("Select rows in the Found list first (Ctrl/Shift for several).");
             return;
         }
         self.add_found_rows(&idx);
@@ -1196,7 +1214,7 @@ impl BSDConquerorApp {
             .filter(|i| *i < self.result_rows.len())
             .collect();
         if idx.is_empty() {
-            self.status = "Seleciona linhas na lista de baixo para as remover.".into();
+            self.status = tr("Select rows in the lower list to remove them.");
             return;
         }
         idx.sort_unstable();
@@ -1215,7 +1233,7 @@ impl BSDConquerorApp {
         self.cursor = None;
         self.anchor = None;
         self.editing = None;
-        self.status = format!("{} linha(s) removida(s) da lista.", idx.len());
+        self.status = trf("{} row(s) removed from the list.", &[&idx.len()]);
     }
 
     fn begin_edit(&mut self, i: usize, col: EditCol) {
@@ -1237,7 +1255,7 @@ impl BSDConquerorApp {
             .or_else(|| self.selected_rows.iter().copied().min());
         match row {
             Some(i) => self.begin_edit(i, EditCol::Value),
-            None => self.status = "Seleciona uma linha para editar o valor.".into(),
+            None => self.status = tr("Select a row to edit its value."),
         }
     }
 
@@ -1246,10 +1264,10 @@ impl BSDConquerorApp {
     fn ui_found(&mut self, ui: &mut egui::Ui) {
         let mut add_clicked = false;
         ui.horizontal(|ui| {
-            title(ui, &format!("Found: {}", self.found_total));
+            title(ui, &trf("Found: {}", &[&self.found_total]));
             ui.with_layout(egui::Layout::right_to_left(egui::Align::Center), |ui| {
                 let can = !self.found_rows.is_empty();
-                let btn = egui::Button::image_and_text(ico(ui, Icon::Add), "Add Selected");
+                let btn = egui::Button::image_and_text(ico(ui, Icon::Add), tr("Add Selected"));
                 if ui.add_enabled(can, btn).clicked() {
                     add_clicked = true;
                 }
@@ -1262,7 +1280,9 @@ impl BSDConquerorApp {
         let mods = ui.input(|i| i.modifiers);
         let mut click: Option<(usize, bool, bool)> = None;
         let mut dbl: Option<usize> = None;
-        let (_, hr) = draw_row(ui, &w, &["Address", "Type", "Value"], &[false; 3], false, false, true);
+        let hdr = [tr("Address"), tr("Type"), tr("Value")];
+        let (_, hr) =
+            draw_row(ui, &w, &[hdr[0].as_str(), hdr[1].as_str(), hdr[2].as_str()], &[false; 3], false, false, true);
         col_handles(ui, &hr, &mut self.col_found, k, "found");
         egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
@@ -1298,12 +1318,12 @@ impl BSDConquerorApp {
     }
 
     fn ui_controls(&mut self, ui: &mut egui::Ui) {
-        title(ui, "Process selection");
+        title(ui, &tr("Process selection"));
         ui.horizontal(|ui| {
             let w = (ui.available_width() - 130.0).max(60.0);
             let filter_resp = ui.add(
                 egui::TextEdit::singleline(&mut self.process_filter)
-                    .hint_text("Filter process name, PID or user…")
+                    .hint_text(tr("Filter process name, PID or user…"))
                     .desired_width(w),
             );
             if self.focus_filter_once {
@@ -1311,7 +1331,7 @@ impl BSDConquerorApp {
                 self.focus_filter_once = false;
             }
             if ui
-                .add(egui::Button::image_and_text(ico(ui, Icon::Refresh), "Refresh"))
+                .add(egui::Button::image_and_text(ico(ui, Icon::Refresh), tr("Refresh")))
                 .clicked()
             {
                 self.refresh_processes();
@@ -1327,8 +1347,16 @@ impl BSDConquerorApp {
         let proc_h = 6.0 * (ui.text_style_height(&egui::TextStyle::Body) + 8.0);
         ui.scope(|ui| {
             ui.spacing_mut().item_spacing.y = 0.0;
-            let (resp, rects) =
-                draw_row(ui, &pw, &["PID", "User", "Process"], &[false; 3], false, false, true);
+            let hdr = [tr("PID"), tr("User"), tr("Process")];
+            let (resp, rects) = draw_row(
+                ui,
+                &pw,
+                &[hdr[0].as_str(), hdr[1].as_str(), hdr[2].as_str()],
+                &[false; 3],
+                false,
+                false,
+                true,
+            );
             col_handles(ui, &rects, &mut self.col_proc, k, "proc");
             // Seta de ordenação desenhada como triângulo (a fonte do egui não tem ▲/▼).
             if let Some(r) = rects.get(self.sort_col) {
@@ -1401,16 +1429,23 @@ impl BSDConquerorApp {
             }
         }
 
-        ui.label(self.selected_text.as_str());
+        match &self.selected_info {
+            Some((cmd, pid, user)) => {
+                ui.label(trf("Selected: {}  |  PID: {}  |  User: {}", &[cmd, pid, user]));
+            }
+            None => {
+                ui.label(tr("No process selected"));
+            }
+        }
         ui.separator();
 
         // Linha de valor
         ui.horizontal(|ui| {
-            ui.label("Value:");
+            ui.label(tr("Value:"));
             let w = (ui.available_width() - 200.0).max(60.0);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.value_input)
-                    .hint_text("Integer value, e.g. 123456")
+                    .hint_text(tr("Integer value, e.g. 123456"))
                     .desired_width(w),
             );
             if self.focus_value_once {
@@ -1418,14 +1453,14 @@ impl BSDConquerorApp {
                 self.focus_value_once = false;
             }
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let label = if self.scan_has_results { "Next Search" } else { "Search" };
+            let label = if self.scan_has_results { tr("Next Search") } else { tr("Search") };
             let can = !self.searching;
             let search_btn = egui::Button::image_and_text(ico(ui, Icon::Search), label);
             if ui.add_enabled(can, search_btn).clicked() || (enter && can) {
                 self.on_search();
             }
             if ui
-                .add(egui::Button::image_and_text(ico(ui, Icon::Reset), "Reset"))
+                .add(egui::Button::image_and_text(ico(ui, Icon::Reset), tr("Reset")))
                 .clicked()
             {
                 self.on_reset();
@@ -1434,17 +1469,17 @@ impl BSDConquerorApp {
 
         // Tamanho dos valores a procurar (largura em bytes).
         ui.horizontal(|ui| {
-            ui.label("Data type:");
+            ui.label(tr("Data type:"));
             egui::ComboBox::new("scan_kind_combo", "")
-                .selected_text(SCAN_NAMES[self.scan_kind])
+                .selected_text(tr(SCAN_NAMES[self.scan_kind]))
                 .show_ui(ui, |ui| {
                     for (i, n) in SCAN_NAMES.iter().enumerate() {
-                        ui.selectable_value(&mut self.scan_kind, i, *n);
+                        ui.selectable_value(&mut self.scan_kind, i, tr(n));
                     }
                 });
         });
 
-        ui.label("Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value.");
+        ui.label(tr("Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value."));
     }
 
     fn ui_results(&mut self, ui: &mut egui::Ui) {
@@ -1454,23 +1489,23 @@ impl BSDConquerorApp {
         let total = bw * 4.0 + ui.spacing().item_spacing.x * 3.0;
         ui.horizontal(|ui| {
             ui.add_space(((ui.available_width() - total) / 2.0).max(0.0));
-            let b = egui::Button::image_and_text(ico(ui, Icon::SelectAll), "Select all");
+            let b = egui::Button::image_and_text(ico(ui, Icon::SelectAll), tr("Select all"));
             if ui.add_sized([bw, 26.0 * k], b).clicked() {
                 self.select_all();
             }
-            let b = egui::Button::image_and_text(ico(ui, Icon::Clear), "Clear results");
+            let b = egui::Button::image_and_text(ico(ui, Icon::Clear), tr("Clear results"));
             if ui.add_sized([bw, 26.0 * k], b).clicked() {
                 self.on_clear();
             }
-            let b = egui::Button::image_and_text(ico(ui, Icon::Remove), "Remove");
+            let b = egui::Button::image_and_text(ico(ui, Icon::Remove), tr("Remove"));
             if ui
                 .add_sized([bw, 26.0 * k], b)
-                .on_hover_text("Remove as linhas selecionadas (tecla Delete)")
+                .on_hover_text(tr("Remove the selected rows (Delete key)"))
                 .clicked()
             {
                 self.remove_selected();
             }
-            let b = egui::Button::image_and_text(ico(ui, Icon::Quit), "Quit");
+            let b = egui::Button::image_and_text(ico(ui, Icon::Quit), tr("Quit"));
             if ui.add_sized([bw, 26.0 * k], b).clicked() {
                 ui.ctx().send_viewport_cmd(egui::ViewportCommand::Close);
             }
@@ -1490,10 +1525,11 @@ impl BSDConquerorApp {
         let cr = self.col_results;
         let w = [cr[0] * k, cr[1] * k, cr[2] * k, cr[3] * k, 0.0];
         ui.spacing_mut().item_spacing.y = 0.0;
+        let hdr = [tr("Lock"), tr("Description"), tr("Address"), tr("Type"), tr("Value")];
         let (_, hr) = draw_row(
             ui,
             &w,
-            &["Lock", "Description", "Address", "Type", "Value"],
+            &[hdr[0].as_str(), hdr[1].as_str(), hdr[2].as_str(), hdr[3].as_str(), hdr[4].as_str()],
             &[false; 5],
             false,
             false,
@@ -1505,7 +1541,7 @@ impl BSDConquerorApp {
             ui.spacing_mut().item_spacing.y = 0.0;
             if self.result_rows.is_empty() {
                 ui.add_space(8.0);
-                ui.weak("Seleciona linhas na lista Found e usa \"Add Selected\" (ou duplo clique numa linha) para as trazer para aqui.");
+                ui.weak(tr("Select rows in the Found list and use \"Add Selected\" (or double-click a row) to bring them here."));
             }
             for i in 0..self.result_rows.len() {
                 let sel = self.selected_rows.contains(&i);
@@ -1615,65 +1651,74 @@ impl BSDConquerorApp {
             ZoomOut,
             ZoomReset,
             About,
+            Lang(&'static str),
         }
         let mut act: Option<Act> = None;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
-                ui.menu_button("File", |ui| {
+                ui.menu_button(tr("File"), |ui| {
                     if ui
-                        .add(egui::Button::new("Refresh processes").shortcut_text("F5"))
+                        .add(egui::Button::new(tr("Refresh processes")).shortcut_text("F5"))
                         .clicked()
                     {
                         act = Some(Act::Refresh);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.add(egui::Button::new("Quit").shortcut_text("Ctrl+Q")).clicked() {
+                    if ui.add(egui::Button::new(tr("Quit")).shortcut_text("Ctrl+Q")).clicked() {
                         act = Some(Act::Quit);
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("Search", |ui| {
-                    if ui.button("Reset search").clicked() {
+                ui.menu_button(tr("Search"), |ui| {
+                    if ui.button(tr("Reset search")).clicked() {
                         act = Some(Act::Reset);
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("List", |ui| {
+                ui.menu_button(tr("List"), |ui| {
                     if ui
-                        .add(egui::Button::new("Select all").shortcut_text("Ctrl+A"))
+                        .add(egui::Button::new(tr("Select all")).shortcut_text("Ctrl+A"))
                         .clicked()
                     {
                         act = Some(Act::SelectAll);
                         ui.close_menu();
                     }
                     if ui
-                        .add(egui::Button::new("Remove selected").shortcut_text("Del"))
+                        .add(egui::Button::new(tr("Remove selected")).shortcut_text("Del"))
                         .clicked()
                     {
                         act = Some(Act::Remove);
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button("Clear list").clicked() {
+                    if ui.button(tr("Clear list")).clicked() {
                         act = Some(Act::Clear);
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("View", |ui| {
-                    if ui.add(egui::Button::new("Zoom in").shortcut_text("Ctrl +")).clicked() {
+                ui.menu_button(tr("View"), |ui| {
+                    if ui.add(egui::Button::new(tr("Zoom in")).shortcut_text("Ctrl +")).clicked() {
                         act = Some(Act::ZoomIn);
                     }
-                    if ui.add(egui::Button::new("Zoom out").shortcut_text("Ctrl -")).clicked() {
+                    if ui.add(egui::Button::new(tr("Zoom out")).shortcut_text("Ctrl -")).clicked() {
                         act = Some(Act::ZoomOut);
                     }
-                    if ui.add(egui::Button::new("Reset zoom").shortcut_text("Ctrl 0")).clicked() {
+                    if ui.add(egui::Button::new(tr("Reset zoom")).shortcut_text("Ctrl 0")).clicked() {
                         act = Some(Act::ZoomReset);
                         ui.close_menu();
                     }
                 });
-                ui.menu_button("Help", |ui| {
-                    if ui.button("About BSDConqueror").clicked() {
+                ui.menu_button(tr("Language"), |ui| {
+                    for (code, name) in i18n::LANGUAGES {
+                        if ui.radio(i18n::language() == code, name).clicked() {
+                            act = Some(Act::Lang(code));
+                            ui.close_menu();
+                        }
+                    }
+                });
+                ui.menu_button(tr("Help"), |ui| {
+                    if ui.button(tr("About BSDConqueror")).clicked() {
                         act = Some(Act::About);
                         ui.close_menu();
                     }
@@ -1693,19 +1738,18 @@ impl BSDConquerorApp {
             Some(Act::About) => {
                 let cfg = Prefs::path()
                     .map(|p| p.display().to_string())
-                    .unwrap_or_else(|| "(indisponível)".to_string());
-                self.show_alert(
-                    "Sobre o BSDConqueror",
-                    format!(
-                        "BSDConqueror {}\n\nPesquisador e editor de memória para FreeBSD.\n\
-                         Usa só ferramentas nativas do sistema: ptrace, procstat e ps.\n\n\
-                         Domínio público (Unlicense): uso livre, sem garantias.\n\n\
-                         Preferências: {}",
-                        env!("CARGO_PKG_VERSION"),
-                        cfg
-                    ),
+                    .unwrap_or_else(|| tr("(unavailable)"));
+                let text = format!(
+                    "BSDConqueror {}\n\n{}\n{}\n\n{}\n\n{}",
+                    env!("CARGO_PKG_VERSION"),
+                    tr("Memory scanner and editor for FreeBSD."),
+                    tr("Uses only native system tools: ptrace, procstat and ps."),
+                    tr("Public domain (Unlicense): free to use, no warranty."),
+                    trf("Preferences: {}", &[&cfg]),
                 );
+                self.show_alert(tr("About BSDConqueror"), text);
             }
+            Some(Act::Lang(code)) => i18n::set_language(code),
             None => {}
         }
     }
@@ -1727,7 +1771,7 @@ impl BSDConquerorApp {
                 ui.label(egui::RichText::new(msg).color(fg));
                 ui.add_space(14.0);
                 ui.vertical_centered(|ui| {
-                    if ui.button("    OK    ").clicked() {
+                    if ui.button(format!("    {}    ", tr("OK"))).clicked() {
                         close = true;
                     }
                 });

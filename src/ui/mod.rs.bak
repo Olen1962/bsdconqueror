@@ -1455,7 +1455,7 @@ impl BSDConquerorApp {
                 });
         });
 
-        ui.label("Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value.");
+        ui.label(tr("Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value."));
     }
 
     fn ui_results(&mut self, ui: &mut egui::Ui) {
@@ -1640,7 +1640,7 @@ impl BSDConquerorApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.add(egui::Button::new(tr("Quit")).shortcut_text("Ctrl+Q")).clicked() {
+                    if ui.add(egui::Button::new(tr("Sair")).shortcut_text("Ctrl+Q")).clicked() {
                         act = Some(Act::Quit);
                         ui.close_menu();
                     }
@@ -1653,7 +1653,7 @@ impl BSDConquerorApp {
                 });
                 ui.menu_button(tr("List"), |ui| {
                     if ui
-                        .add(egui::Button::new(tr("Select all")).shortcut_text("Ctrl+A"))
+                        .add(egui::Button::new(tr("Selecionar todos")).shortcut_text("Ctrl+A"))
                         .clicked()
                     {
                         act = Some(Act::SelectAll);
@@ -1667,7 +1667,7 @@ impl BSDConquerorApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.button(tr("Clear list")).clicked() {
+                    if ui.button(tr("Limpat")).clicked() {
                         act = Some(Act::Clear);
                         ui.close_menu();
                     }

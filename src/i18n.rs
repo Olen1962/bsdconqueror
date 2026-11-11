@@ -13,10 +13,20 @@ use std::fmt::Display;
 use std::sync::{OnceLock, RwLock};
 
 /// Idiomas disponíveis: (código, nome mostrado no menu).
-pub const LANGUAGES: [(&str, &str); 2] = [("en", "English"), ("pt", "Português")];
+pub const LANGUAGES: [(&str, &str); 4] = [
+    ("en", "English"),
+    ("pt", "Português"),
+    ("fr", "Français"),
+    ("de", "Deutsch"),
+];
 
 /// Os ficheiros .po são embebidos no executável: não é preciso instalar nada.
+/// Para acrescentar um idioma: 1) cria po/xx.po; 2) junta-o a PO_FILES;
+/// 3) junta ("xx", "Nome") a LANGUAGES. O inglês não precisa de ficheiro.
 const PT_PO: &str = include_str!("../po/pt.po");
+const FR_PO: &str = include_str!("../po/fr.po");
+const DE_PO: &str = include_str!("../po/de.po");
+const PO_FILES: [(&str, &str); 3] = [("pt", PT_PO), ("fr", FR_PO), ("de", DE_PO)];
 
 struct State {
     lang: String,
@@ -31,9 +41,9 @@ fn state() -> &'static RwLock<State> {
 
 /// Muda o idioma ("en" ou "pt"). Qualquer outro código fica em inglês.
 pub fn set_language(code: &str) {
-    let (lang, table) = match code {
-        "pt" => ("pt", parse_po(PT_PO)),
-        _ => ("en", HashMap::new()), // inglês: as próprias frases do código
+    let (lang, table) = match PO_FILES.iter().find(|(c, _)| *c == code) {
+        Some((c, po)) => (*c, parse_po(po)),
+        None => ("en", HashMap::new()), // inglês: as próprias frases do código
     };
     if let Ok(mut s) = state().write() {
         s.lang = lang.to_string();
@@ -62,6 +72,12 @@ pub fn system_language() -> String {
         }
     }
     "en".to_string()
+}
+
+/// Marca uma frase para tradução SEM a traduzir agora (útil em listas e constantes).
+/// O script extract_po.py também a encontra; a tradução faz-se depois com tr().
+pub const fn n_(s: &'static str) -> &'static str {
+    s
 }
 
 /// Traduz uma frase. Sem tradução, devolve a própria frase.
@@ -188,6 +204,30 @@ mod tests {
     fn frase_sem_traducao_fica_em_ingles() {
         let po = "msgid \"Quit\"\nmsgstr \"\"\n";
         assert!(parse_po(po).is_empty());
+    }
+
+    #[test]
+    fn todos_os_idiomas_tem_entradas() {
+        for (code, po) in PO_FILES {
+            assert!(!parse_po(po).is_empty(), "po/{}.po está vazio", code);
+        }
+    }
+
+    #[test]
+    fn traducoes_tem_os_mesmos_marcadores() {
+        // Cada {} da frase original tem de existir também na tradução, por ordem.
+        for (code, po) in PO_FILES {
+            for (id, st) in parse_po(po) {
+                assert_eq!(
+                    id.matches("{}").count(),
+                    st.matches("{}").count(),
+                    "[{}] número de {{}} diferente: {:?} -> {:?}",
+                    code,
+                    id,
+                    st
+                );
+            }
+        }
     }
 
     #[test]

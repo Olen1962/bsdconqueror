@@ -1,0 +1,297 @@
+# Deutsche Übersetzung von BSDConqueror.
+# Gemeinfrei: Frei nutzbar, veränderbar und weitergebbar.
+#
+# Jedes "msgid" ist der englische Satz aus dem Code; "msgstr" ist die Übersetzung.
+# Die Platzhalter {} müssen in gleicher Anzahl und Reihenfolge wie im Original stehen.
+msgid ""
+msgstr ""
+"Project-Id-Version: BSDConqueror\n"
+"Language: de\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+msgid "2 and 4 Bytes"
+msgstr "2 und 4 Byte"
+
+msgid "1 Byte"
+msgstr "1 Byte"
+
+msgid "2 Bytes"
+msgstr "2 Byte"
+
+msgid "4 Bytes"
+msgstr "4 Byte"
+
+msgid "8 Bytes"
+msgstr "8 Byte"
+
+msgid "Auto (1, 2, 4 and 8)"
+msgstr "Auto (1, 2, 4 und 8)"
+
+msgid "Select a process, type a value and search (processes of other users require root)."
+msgstr "Wählen Sie einen Prozess, geben Sie einen Wert ein und starten Sie die Suche (Prozesse anderer Benutzer erfordern root)."
+
+msgid "{} processes listed."
+msgstr "{} Prozesse aufgelistet."
+
+msgid "Process selected: {} (PID {})."
+msgstr "Prozess ausgewählt: {} (PID {})."
+
+msgid "BSDConqueror - Error"
+msgstr "BSDConqueror - Fehler"
+
+msgid "Select a process in the list first!"
+msgstr "Wählen Sie zuerst einen Prozess in der Liste aus!"
+
+msgid "Type an integer value to search for."
+msgstr "Geben Sie einen ganzzahligen Suchwert ein."
+
+msgid "BSDConqueror - Invalid input"
+msgstr "BSDConqueror - Ungültige Eingabe"
+
+msgid "Enter a valid integer value to search for!"
+msgstr "Geben Sie einen gültigen ganzzahligen Wert für die Suche ein!"
+
+msgid "Search"
+msgstr "Suchen"
+
+msgid "Next Search"
+msgstr "Nächste Suche"
+
+msgid "{}: PID {}, value {}… (Auto mode: may take a long time)"
+msgstr "{}: PID {}, Wert {}… (Auto-Modus: kann sehr lange dauern)"
+
+msgid "{}: PID {}, value {}… (the process is paused during the search)"
+msgstr "{}: PID {}, Wert {}… (der Prozess wird während der Suche angehalten)"
+
+msgid "None of the {} addresses has the value {}. Current values (sample): {}."
+msgstr "Keine der {} Adressen hat den Wert {}. Aktuelle Werte (Stichprobe): {}."
+
+msgid "(limit reached: partial results)"
+msgstr "(Limit erreicht: Teilergebnisse)"
+
+msgid "{}: no address with the value {}."
+msgstr "{}: keine Adresse mit dem Wert {}."
+
+msgid "{}: {} addresses (showing {}).{}"
+msgstr "{}: {} Adressen ({} angezeigt).{}"
+
+msgid "BSDConqueror - Execution error"
+msgstr "BSDConqueror - Ausführungsfehler"
+
+msgid "Error: {}"
+msgstr "Fehler: {}"
+
+msgid "Select a process before editing values."
+msgstr "Wählen Sie einen Prozess, bevor Sie Werte bearbeiten."
+
+msgid "Invalid integer value."
+msgstr "Ungültiger ganzzahliger Wert."
+
+msgid "Writing {} to {} address(es)…"
+msgstr "Schreibe {} an {} Adresse(n)…"
+
+msgid "BSDConqueror - Write error"
+msgstr "BSDConqueror - Schreibfehler"
+
+msgid "{} of {} writes failed.\n\n{}"
+msgstr "{} von {} Schreibvorgängen sind fehlgeschlagen.\n\n{}"
+
+msgid "Value at {} changed to {}."
+msgstr "Wert bei {} auf {} geändert."
+
+msgid "Value {} written to {} address(es)."
+msgstr "Wert {} an {} Adresse(n) geschrieben."
+
+msgid "Error locking value: {}"
+msgstr "Fehler beim Sperren des Werts: {}"
+
+msgid "Error accessing the process: {}"
+msgstr "Fehler beim Zugriff auf den Prozess: {}"
+
+msgid "Error accessing the process: {} — updates and locks disabled."
+msgstr "Fehler beim Zugriff auf den Prozess: {} — Aktualisierung und Sperren deaktiviert."
+
+msgid "Lock on: {} = {}"
+msgstr "Sperre aktiv: {} = {}"
+
+msgid "Cannot lock the value '{}'."
+msgstr "Der Wert '{}' kann nicht gesperrt werden."
+
+msgid "Lock off: {}"
+msgstr "Sperre deaktiviert: {}"
+
+msgid "{} without a valid value"
+msgstr "{} ohne gültigen Wert"
+
+msgid "Lock on for {} address(es){}."
+msgstr "Sperre aktiv für {} Adresse(n){}."
+
+msgid "Lock off for {} address(es)."
+msgstr "Sperre deaktiviert für {} Adresse(n)."
+
+msgid "All locks were turned off."
+msgstr "Alle Sperren wurden deaktiviert."
+
+msgid "Search reset."
+msgstr "Suche zurückgesetzt."
+
+msgid "Lower list cleared."
+msgstr "Untere Liste geleert."
+
+msgid "No description"
+msgstr "Keine Beschreibung"
+
+msgid "{} address(es) added; {} were already in the list."
+msgstr "{} Adresse(n) hinzugefügt; {} waren bereits in der Liste."
+
+msgid "{} address(es) added to the lower list."
+msgstr "{} Adresse(n) zur unteren Liste hinzugefügt."
+
+msgid "Select rows in the Found list first (Ctrl/Shift for several)."
+msgstr "Wählen Sie zuerst Zeilen in der Liste \"Gefunden\" aus (Strg/Umschalt für mehrere)."
+
+msgid "Select rows in the lower list to remove them."
+msgstr "Wählen Sie Zeilen in der unteren Liste aus, um sie zu entfernen."
+
+msgid "{} row(s) removed from the list."
+msgstr "{} Zeile(n) aus der Liste entfernt."
+
+msgid "Select a row to edit its value."
+msgstr "Wählen Sie eine Zeile aus, um ihren Wert zu bearbeiten."
+
+msgid "Found: {}"
+msgstr "Gefunden: {}"
+
+msgid "Add Selected"
+msgstr "Auswahl hinzufügen"
+
+msgid "Address"
+msgstr "Adresse"
+
+msgid "Type"
+msgstr "Typ"
+
+msgid "Value"
+msgstr "Wert"
+
+msgid "Process selection"
+msgstr "Prozessauswahl"
+
+msgid "Filter process name, PID or user…"
+msgstr "Nach Prozessname, PID oder Benutzer filtern…"
+
+msgid "Refresh"
+msgstr "Aktualisieren"
+
+msgid "PID"
+msgstr "PID"
+
+msgid "User"
+msgstr "Benutzer"
+
+msgid "Process"
+msgstr "Prozess"
+
+msgid "Selected: {}  |  PID: {}  |  User: {}"
+msgstr "Ausgewählt: {}  |  PID: {}  |  Benutzer: {}"
+
+msgid "No process selected"
+msgstr "Kein Prozess ausgewählt"
+
+msgid "Value:"
+msgstr "Wert:"
+
+msgid "Integer value, e.g. 123456"
+msgstr "Ganzzahliger Wert, z. B. 123456"
+
+msgid "Reset"
+msgstr "Zurücksetzen"
+
+msgid "Data type:"
+msgstr "Datentyp:"
+
+msgid "Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value."
+msgstr "Native Suche (ptrace): Der Zielprozess wird während der Suche kurz angehalten. Sperre: Auf das Schloss klicken, um einen Wert weiter zu schreiben."
+
+msgid "Select all"
+msgstr "Alles auswählen"
+
+msgid "Clear results"
+msgstr "Ergebnisse löschen"
+
+msgid "Remove"
+msgstr "Entfernen"
+
+msgid "Remove the selected rows (Delete key)"
+msgstr "Entfernt die ausgewählten Zeilen (Entf-Taste)"
+
+msgid "Quit"
+msgstr "Beenden"
+
+msgid "Lock"
+msgstr "Sperre"
+
+msgid "Description"
+msgstr "Beschreibung"
+
+msgid "Select rows in the Found list and use \"Add Selected\" (or double-click a row) to bring them here."
+msgstr "Wählen Sie Zeilen in der Liste \"Gefunden\" aus und verwenden Sie \"Auswahl hinzufügen\" (oder doppelklicken Sie auf eine Zeile), um sie hierher zu übernehmen."
+
+msgid "File"
+msgstr "Datei"
+
+msgid "Refresh processes"
+msgstr "Prozesse aktualisieren"
+
+msgid "Reset search"
+msgstr "Suche zurücksetzen"
+
+msgid "List"
+msgstr "Liste"
+
+msgid "Remove selected"
+msgstr "Auswahl entfernen"
+
+msgid "Clear list"
+msgstr "Liste leeren"
+
+msgid "View"
+msgstr "Ansicht"
+
+msgid "Zoom in"
+msgstr "Vergrößern"
+
+msgid "Zoom out"
+msgstr "Verkleinern"
+
+msgid "Reset zoom"
+msgstr "Zoom zurücksetzen"
+
+msgid "Language"
+msgstr "Sprache"
+
+msgid "Help"
+msgstr "Hilfe"
+
+msgid "About BSDConqueror"
+msgstr "Über BSDConqueror"
+
+msgid "(unavailable)"
+msgstr "(nicht verfügbar)"
+
+msgid "Memory scanner and editor for FreeBSD."
+msgstr "Speicher-Scanner und -Editor für FreeBSD."
+
+msgid "Uses only native system tools: ptrace, procstat and ps."
+msgstr "Verwendet nur native Systemwerkzeuge: ptrace, procstat und ps."
+
+msgid "Public domain (Unlicense): free to use, no warranty."
+msgstr "Gemeinfrei (Unlicense): frei nutzbar, ohne Gewährleistung."
+
+msgid "Preferences: {}"
+msgstr "Einstellungen: {}"
+
+msgid "OK"
+msgstr "OK"

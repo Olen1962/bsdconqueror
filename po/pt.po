@@ -5,11 +5,6 @@
 # o "msgstr" é a tradução. Se o msgstr ficar vazio, o programa mostra o inglês.
 msgid ""
 msgstr ""
-"Project-Id-Version: BSDConqueror\n"
-"Language: pt\n"
-"MIME-Version: 1.0\n"
-"Content-Type: text/plain; charset=UTF-8\n"
-"Content-Transfer-Encoding: 8bit\n"
 
 # ── Menu ──
 msgid "File"
@@ -75,3 +70,207 @@ msgstr "Preferências: {}"
 
 msgid "(unavailable)"
 msgstr "(indisponível)"
+
+#: src/ui/mod.rs:30
+msgid "2 and 4 Bytes"
+msgstr "2 e 4 Bytes"
+
+#: src/ui/mod.rs:31 src/ui/mod.rs:86
+msgid "1 Byte"
+msgstr "1 Byte"
+
+#: src/ui/mod.rs:32 src/ui/mod.rs:87
+msgid "2 Bytes"
+msgstr "2 Bytes"
+
+#: src/ui/mod.rs:33 src/ui/mod.rs:88
+msgid "4 Bytes"
+msgstr "4 Bytes"
+
+#: src/ui/mod.rs:34 src/ui/mod.rs:89
+msgid "8 Bytes"
+msgstr "8 Bytes"
+
+#: src/ui/mod.rs:35
+msgid "Auto (1, 2, 4 and 8)"
+msgstr "Auto (1, 2, 4 e 8)"
+
+#: src/ui/mod.rs:640
+msgid ""
+"Select a process, type a value and search (processes of other users require "
+"root)."
+msgstr ""
+"Selecione um processo, introduza um valor e pesquise (processos de outros utilizadores requerem "
+"root)."
+
+#: src/ui/mod.rs:742
+msgid "{} processes listed."
+msgstr "{} processos listados."
+
+#: src/ui/mod.rs:759
+msgid "Process selected: {} (PID {})."
+msgstr "Processo selecionado: {} (PID {})."
+
+#: src/ui/mod.rs:769
+msgid "BSDConqueror - Error"
+msgstr "BSDConqueror - Erro"
+
+#: src/ui/mod.rs:769
+msgid "Select a process in the list first!"
+msgstr "Selecione primeiro um processo na lista!"
+
+#: src/ui/mod.rs:774
+msgid "Type an integer value to search for."
+msgstr "Introduza um valor inteiro a pesquisar."
+
+#: src/ui/mod.rs:779
+msgid "BSDConqueror - Invalid input"
+msgstr "BSDConqueror - Entrada inválida"
+
+#: src/ui/mod.rs:780
+msgid "Enter a valid integer value to search for!"
+msgstr "Introduza um valor inteiro válido para pesquisar!"
+
+#: src/ui/mod.rs:785 src/ui/mod.rs:817 src/ui/mod.rs:1456 src/ui/mod.rs:1673
+msgid "Search"
+msgstr "Pesquisar"
+
+#: src/ui/mod.rs:785 src/ui/mod.rs:817 src/ui/mod.rs:1456
+msgid "Next Search"
+msgstr "Próxima pesquisa"
+
+#: src/ui/mod.rs:789
+msgid "{}: PID {}, value {}… (Auto mode: may take a long time)"
+msgstr "{}: PID {}, valor {}… (Modo auto: pode demorar bastante tempo)"
+
+#: src/ui/mod.rs:791
+msgid "{}: PID {}, value {}… (the process is paused during the search)"
+msgstr "{}: PID {}, valor {}… (o processo é suspenso durante a pesquisa)"
+
+#: src/ui/mod.rs:824
+msgid "None of the {} addresses has the value {}. Current values (sample): {}."
+msgstr "Nenhum dos {} endereços tem o valor {}. Valores atuais (amostra): {}."
+
+#: src/ui/mod.rs:845
+msgid "(limit reached: partial results)"
+msgstr "(limite atingido: resultados parciais)"
+
+#: src/ui/mod.rs:850
+msgid "{}: no address with the value {}."
+msgstr "{}: nenhum endereço com o valor {}."
+
+#: src/ui/mod.rs:852
+msgid "{}: {} addresses (showing {}).{}"
+msgstr "{}: {} endereços (a mostrar {}).{}"
+
+#: src/ui/mod.rs:860
+msgid "BSDConqueror - Execution error"
+msgstr "BSDConqueror - Erro de execução"
+
+#: src/ui/mod.rs:860
+msgid "Error: {}"
+msgstr "Erro: {}"
+
+#: src/ui/mod.rs:878
+msgid "Select a process before editing values."
+msgstr "Selecione um processo antes de editar os valores."
+
+#: src/ui/mod.rs:882
+msgid "Invalid integer value."
+msgstr "Valor inteiro inválido."
+
+#: src/ui/mod.rs:909
+msgid "Writing {} to {} address(es)…"
+msgstr "A escrever {} em {} endereço(s)…"
+
+#: src/ui/mod.rs:942
+msgid "BSDConqueror - Write error"
+msgstr "BSDConqueror - Erro de escrita"
+
+#: src/ui/mod.rs:943
+msgid ""
+"{} of {} writes failed.\n"
+"\n"
+"{}"
+msgstr ""
+"Falharam {} de {} escritas.\n"
+"\n"
+"{}"
+
+#: src/ui/mod.rs:950
+msgid "Value at {} changed to {}."
+msgstr "Valor em {} alterado para {}."
+
+#: src/ui/mod.rs:952
+msgid "Value {} written to {} address(es)."
+msgstr "Valor {} escrito em {} endereço(s)."
+
+#: src/ui/mod.rs:983
+msgid "Error locking value: {}"
+msgstr "Erro ao bloquear o valor: {}"
+
+#: src/ui/mod.rs:988
+msgid "Error accessing the process: {}"
+msgstr "Erro ao aceder ao processo: {}"
+
+#: src/ui/mod.rs:991
+msgid "Error accessing the process: {} — updates and locks disabled."
+msgstr "Erro ao aceder ao processo: {} — atualizações e bloqueios desativados."
+
+#: src/ui/mod.rs:1092
+msgid "Lock on: {} = {}"
+msgstr "Bloqueio ativado: {} = {}"
+
+#: src/ui/mod.rs:1096
+msgid "Cannot lock the value '{}'."
+msgstr "Não é possível bloquear o valor '{}'."
+
+#: src/ui/mod.rs:1104
+msgid "Lock off: {}"
+msgstr "Bloqueio desativado: {}"
+
+#: src/ui/mod.rs:1113
+msgid "{} without a valid value"
+msgstr "{} sem um valor válido"
+
+#: src/ui/mod.rs:1117
+msgid "Lock on for {} address(es){}."
+msgstr "Bloqueio ativado para {} endereço(s){}."
+
+#: src/ui/mod.rs:1119
+msgid "Lock off for {} address(es)."
+msgstr "Bloqueio desativado para {} endereço(s)."
+
+#: src/ui/mod.rs:1129
+msgid "All locks were turned off."
+msgstr "Todos os bloqueios foram desativados."
+
+msgid "Add Selected"
+msgstr "Adicionar Seleção"
+
+msgid "Description"
+msgstr "Descrição"
+
+msgid "Address"
+msgstr "Endereço"
+
+msgid "Type"
+msgstr "Tipo"
+
+msgid "Value"
+msgstr "Valor"
+
+msgid "Lock"
+msgstr "Bloqueado"
+
+msgid "Clear results"
+msgstr "Limpar lista"
+
+msgid "Found"
+msgstr "Encontrados"
+
+msgid "Refresh"
+msgstr "Atualiza"
+
+msgid "Process selection"
+msgstr "Indique o processo"
