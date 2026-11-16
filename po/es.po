@@ -1,0 +1,445 @@
+# Traducción al español de BSDConqueror.
+# Dominio público: úsalo, modifícalo y distribúyelo como quieras.
+msgid ""
+msgstr ""
+"Project-Id-Version: BSDConqueror\n"
+"Language: es\n"
+"MIME-Version: 1.0\n"
+"Content-Type: text/plain; charset=UTF-8\n"
+"Content-Transfer-Encoding: 8bit\n"
+
+#: src/ui/mod.rs:30
+msgid "2 and 4 Bytes"
+msgstr "2 y 4 Bytes"
+
+#: src/ui/mod.rs:31 src/ui/mod.rs:86
+msgid "1 Byte"
+msgstr "1 Byte"
+
+#: src/ui/mod.rs:32 src/ui/mod.rs:87
+msgid "2 Bytes"
+msgstr "2 Bytes"
+
+#: src/ui/mod.rs:33 src/ui/mod.rs:88
+msgid "4 Bytes"
+msgstr "4 Bytes"
+
+#: src/ui/mod.rs:34 src/ui/mod.rs:89
+msgid "8 Bytes"
+msgstr "8 Bytes"
+
+#: src/ui/mod.rs:35
+msgid "Auto (1, 2, 4 and 8)"
+msgstr "Auto (1, 2, 4 y 8)"
+
+#: src/ui/mod.rs:688
+msgid "Select a process, type a value and search (processes of other users require root)."
+msgstr "Selecciona un proceso, escribe un valor y busca (los procesos de otros usuarios requieren root)."
+
+#: src/ui/mod.rs:790
+msgid "{} processes listed."
+msgstr "{} procesos listados."
+
+#: src/ui/mod.rs:808
+msgid "Process selected: {} (PID {})."
+msgstr "Proceso seleccionado: {} (PID {})."
+
+#: src/ui/mod.rs:818
+msgid "BSDConqueror - Error"
+msgstr "BSDConqueror - Error"
+
+#: src/ui/mod.rs:818
+msgid "Select a process in the list first!"
+msgstr "¡Selecciona primero un proceso de la lista!"
+
+#: src/ui/mod.rs:823
+msgid "Type an integer value to search for."
+msgstr "Escribe un valor entero para buscar."
+
+#: src/ui/mod.rs:828
+msgid "BSDConqueror - Invalid input"
+msgstr "BSDConqueror - Entrada no válida"
+
+#: src/ui/mod.rs:829
+msgid "Enter a valid integer value to search for!"
+msgstr "¡Introduce un valor entero válido para buscar!"
+
+#: src/ui/mod.rs:834 src/ui/mod.rs:905 src/ui/mod.rs:1609 src/ui/mod.rs:1897
+msgid "Search"
+msgstr "Buscar"
+
+#: src/ui/mod.rs:834 src/ui/mod.rs:905 src/ui/mod.rs:1609
+msgid "Next Search"
+msgstr "Siguiente búsqueda"
+
+#: src/ui/mod.rs:838
+msgid "{}: PID {}, value {}... (Auto mode: may take a long time)"
+msgstr "{}: PID {}, valor {}... (modo Auto: puede tardar bastante)"
+
+#: src/ui/mod.rs:840
+msgid "{}: PID {}, value {}... (the process is paused during the search)"
+msgstr "{}: PID {}, valor {}... (el proceso se pausa durante la búsqueda)"
+
+#: src/ui/mod.rs:858
+msgid "Undoing the last search..."
+msgstr "Deshaciendo la última búsqueda..."
+
+#: src/ui/mod.rs:881
+msgid "Undone: {} addresses restored."
+msgstr "Deshecho: {} direcciones restauradas."
+
+#: src/ui/mod.rs:885 src/ui/mod.rs:949
+msgid "BSDConqueror - Execution error"
+msgstr "BSDConqueror - Error de ejecución"
+
+#: src/ui/mod.rs:885 src/ui/mod.rs:949
+msgid "Error: {}"
+msgstr "Error: {}"
+
+#: src/ui/mod.rs:913
+msgid "None of the {} addresses has the value {}. Current values (sample): {}."
+msgstr "Ninguna de las {} direcciones tiene el valor {}. Valores actuales (muestra): {}."
+
+#: src/ui/mod.rs:934
+msgid "(limit reached: partial results)"
+msgstr "(límite alcanzado: resultados parciales)"
+
+#: src/ui/mod.rs:939
+msgid "{}: no address with the value {}."
+msgstr "{}: ninguna dirección con el valor {}."
+
+#: src/ui/mod.rs:941
+msgid "{}: {} addresses (showing {}).{}"
+msgstr "{}: {} direcciones (mostrando {}).{}"
+
+#: src/ui/mod.rs:967
+msgid "Select a process before editing values."
+msgstr "Selecciona un proceso antes de editar valores."
+
+#: src/ui/mod.rs:971
+msgid "Invalid integer value."
+msgstr "Valor entero no válido."
+
+#: src/ui/mod.rs:998
+msgid "Writing {} to {} address(es)..."
+msgstr "Escribiendo {} en {} dirección(es)..."
+
+#: src/ui/mod.rs:1031
+msgid "BSDConqueror - Write error"
+msgstr "BSDConqueror - Error de escritura"
+
+#: src/ui/mod.rs:1032
+msgid "{} of {} writes failed.\n\n{}"
+msgstr "{} de {} escrituras fallaron.\n\n{}"
+
+#: src/ui/mod.rs:1039
+msgid "Value at {} changed to {}."
+msgstr "Valor en {} cambiado a {}."
+
+#: src/ui/mod.rs:1041
+msgid "Value {} written to {} address(es)."
+msgstr "Valor {} escrito en {} dirección(es)."
+
+#: src/ui/mod.rs:1079
+msgid "Error locking value: {}"
+msgstr "Error al bloquear el valor: {}"
+
+#: src/ui/mod.rs:1084
+msgid "Error accessing the process: {}"
+msgstr "Error al acceder al proceso: {}"
+
+#: src/ui/mod.rs:1087
+msgid "Error accessing the process: {} - updates and locks disabled."
+msgstr "Error al acceder al proceso: {} - actualizaciones y bloqueos deshabilitados."
+
+#: src/ui/mod.rs:1188
+msgid "Lock on: {} = {}"
+msgstr "Bloqueo activo: {} = {}"
+
+#: src/ui/mod.rs:1192
+msgid "Cannot lock the value '{}'."
+msgstr "No se puede bloquear el valor '{}'."
+
+#: src/ui/mod.rs:1200
+msgid "Lock off: {}"
+msgstr "Bloqueo desactivado: {}"
+
+#: src/ui/mod.rs:1209
+msgid "{} without a valid value"
+msgstr "{} sin valor válido"
+
+#: src/ui/mod.rs:1213
+msgid "Lock on for {} address(es){}."
+msgstr "Bloqueo activo en {} dirección(es){}."
+
+#: src/ui/mod.rs:1215
+msgid "Lock off for {} address(es)."
+msgstr "Bloqueo desactivado en {} dirección(es)."
+
+#: src/ui/mod.rs:1225
+msgid "All locks were turned off."
+msgstr "Todos los bloqueos fueron desactivados."
+
+#: src/ui/mod.rs:1242
+msgid "Search reset."
+msgstr "Búsqueda restablecida."
+
+#: src/ui/mod.rs:1248
+msgid "Lower list cleared."
+msgstr "Lista inferior borrada."
+
+#: src/ui/mod.rs:1283
+msgid "No description"
+msgstr "Sin descripción"
+
+#: src/ui/mod.rs:1289
+msgid "{} address(es) added; {} were already in the list."
+msgstr "{} dirección(es) añadida(s); {} ya estaban en la lista."
+
+#: src/ui/mod.rs:1291
+msgid "{} address(es) added to the lower list."
+msgstr "{} dirección(es) añadida(s) a la lista inferior."
+
+#: src/ui/mod.rs:1299
+msgid "Select rows in the Found list first (Ctrl/Shift for several)."
+msgstr "Selecciona primero filas en la lista Encontrados (Ctrl/Mayús para varias)."
+
+#: src/ui/mod.rs:1314
+msgid "Select rows in the lower list to remove them."
+msgstr "Selecciona filas en la lista inferior para eliminarlas."
+
+#: src/ui/mod.rs:1333
+msgid "{} row(s) removed from the list."
+msgstr "{} fila(s) eliminada(s) de la lista."
+
+#: src/ui/mod.rs:1355
+msgid "Select a row to edit its value."
+msgstr "Selecciona una fila para editar su valor."
+
+#: src/ui/mod.rs:1364
+msgid "Found: {}"
+msgstr "Encontrados: {}"
+
+#: src/ui/mod.rs:1367
+msgid "Add Selected"
+msgstr "Añadir seleccionados"
+
+#: src/ui/mod.rs:1381 src/ui/mod.rs:1690
+msgid "Address"
+msgstr "Dirección"
+
+#: src/ui/mod.rs:1381 src/ui/mod.rs:1690
+msgid "Type"
+msgstr "Tipo"
+
+#: src/ui/mod.rs:1381 src/ui/mod.rs:1690
+msgid "Value"
+msgstr "Valor"
+
+#: src/ui/mod.rs:1404
+msgid "Add to list"
+msgstr "Añadir a la lista"
+
+#: src/ui/mod.rs:1409 src/ui/mod.rs:1756
+msgid "Copy address"
+msgstr "Copiar dirección"
+
+#: src/ui/mod.rs:1413 src/ui/mod.rs:1760
+msgid "Copy value"
+msgstr "Copiar valor"
+
+#: src/ui/mod.rs:1418 src/ui/mod.rs:1653 src/ui/mod.rs:1769 src/ui/mod.rs:1820 src/ui/mod.rs:1915
+msgid "Select all"
+msgstr "Seleccionar todo"
+
+#: src/ui/mod.rs:1447
+msgid "Process selection"
+msgstr "Selección de proceso"
+
+#: src/ui/mod.rs:1452
+msgid "Filter process name, PID or user..."
+msgstr "Filtrar nombre de proceso, PID o usuario..."
+
+#: src/ui/mod.rs:1460
+msgid "Refresh"
+msgstr "Actualizar"
+
+#: src/ui/mod.rs:1477
+msgid "PID"
+msgstr "PID"
+
+#: src/ui/mod.rs:1477
+msgid "User"
+msgstr "Usuario"
+
+#: src/ui/mod.rs:1477
+msgid "Process"
+msgstr "Proceso"
+
+#: src/ui/mod.rs:1541
+msgid "Select this process"
+msgstr "Seleccionar este proceso"
+
+#: src/ui/mod.rs:1546
+msgid "Copy PID"
+msgstr "Copiar PID"
+
+#: src/ui/mod.rs:1550
+msgid "Copy name"
+msgstr "Copiar nombre"
+
+#: src/ui/mod.rs:1556 src/ui/mod.rs:1885
+msgid "Refresh processes"
+msgstr "Actualizar procesos"
+
+#: src/ui/mod.rs:1587
+msgid "Selected: {}  |  PID: {}  |  User: {}"
+msgstr "Seleccionado: {}  |  PID: {}  |  Usuario: {}"
+
+#: src/ui/mod.rs:1590
+msgid "No process selected"
+msgstr "Ningún proceso seleccionado"
+
+#: src/ui/mod.rs:1597
+msgid "Value:"
+msgstr "Valor:"
+
+#: src/ui/mod.rs:1601
+msgid "Integer value, e.g. 123456"
+msgstr "Valor entero, ej. 123456"
+
+#: src/ui/mod.rs:1615
+msgid "Undo"
+msgstr "Deshacer"
+
+#: src/ui/mod.rs:1618 src/ui/mod.rs:1901
+msgid "Undo last search"
+msgstr "Deshacer última búsqueda"
+
+#: src/ui/mod.rs:1624
+msgid "Reset"
+msgstr "Restablecer"
+
+#: src/ui/mod.rs:1633
+msgid "Data type:"
+msgstr "Tipo de datos:"
+
+#: src/ui/mod.rs:1643
+msgid "Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value."
+msgstr "Escaneo nativo (ptrace): el proceso de destino se pausa brevemente durante el escaneo. Candado: haz clic en el candado para seguir escribiendo un valor."
+
+#: src/ui/mod.rs:1657
+msgid "Clear results"
+msgstr "Borrar resultados"
+
+#: src/ui/mod.rs:1661 src/ui/mod.rs:1765
+msgid "Remove"
+msgstr "Eliminar"
+
+#: src/ui/mod.rs:1664
+msgid "Remove the selected rows (Delete key)"
+msgstr "Eliminar las filas seleccionadas (tecla Supr)"
+
+#: src/ui/mod.rs:1669 src/ui/mod.rs:1892
+msgid "Quit"
+msgstr "Salir"
+
+#: src/ui/mod.rs:1690
+msgid "Lock"
+msgstr "Bloquear"
+
+#: src/ui/mod.rs:1690
+msgid "Description"
+msgstr "Descripción"
+
+#: src/ui/mod.rs:1706
+msgid "Select rows in the Found list and use \"Add Selected\" (or double-click a row) to bring them here."
+msgstr "Selecciona filas en la lista Encontrados y usa \"Añadir seleccionados\" (o haz doble clic en una fila) para traerlas aquí."
+
+#: src/ui/mod.rs:1741
+msgid "Edit value"
+msgstr "Editar valor"
+
+#: src/ui/mod.rs:1745
+msgid "Edit description"
+msgstr "Editar descripción"
+
+#: src/ui/mod.rs:1750
+msgid "Unlock value"
+msgstr "Desbloquear valor"
+
+#: src/ui/mod.rs:1750
+msgid "Lock value"
+msgstr "Bloquear valor"
+
+#: src/ui/mod.rs:1824 src/ui/mod.rs:1929
+msgid "Clear list"
+msgstr "Limpiar lista"
+
+#: src/ui/mod.rs:1883
+msgid "File"
+msgstr "Archivo"
+
+#: src/ui/mod.rs:1908
+msgid "Reset search"
+msgstr "Restablecer búsqueda"
+
+#: src/ui/mod.rs:1913
+msgid "List"
+msgstr "Lista"
+
+#: src/ui/mod.rs:1922
+msgid "Remove selected"
+msgstr "Eliminar seleccionados"
+
+#: src/ui/mod.rs:1934
+msgid "View"
+msgstr "Ver"
+
+#: src/ui/mod.rs:1935
+msgid "Zoom in"
+msgstr "Acercar"
+
+#: src/ui/mod.rs:1938
+msgid "Zoom out"
+msgstr "Alejar"
+
+#: src/ui/mod.rs:1941
+msgid "Reset zoom"
+msgstr "Restablecer zoom"
+
+#: src/ui/mod.rs:1946
+msgid "Language"
+msgstr "Idioma"
+
+#: src/ui/mod.rs:1954
+msgid "Help"
+msgstr "Ayuda"
+
+#: src/ui/mod.rs:1955 src/ui/mod.rs:1985
+msgid "About BSDConqueror"
+msgstr "Acerca de BSDConqueror"
+
+#: src/ui/mod.rs:1976
+msgid "(unavailable)"
+msgstr "(no disponible)"
+
+#: src/ui/mod.rs:1980
+msgid "Memory scanner and editor for FreeBSD."
+msgstr "Buscador y editor de memoria para FreeBSD."
+
+#: src/ui/mod.rs:1981
+msgid "Uses only native system tools: ptrace, procstat and ps."
+msgstr "Utiliza solo herramientas nativas del sistema: ptrace, procstat y ps."
+
+#: src/ui/mod.rs:1982
+msgid "Public domain (Unlicense): free to use, no warranty."
+msgstr "Dominio público (Unlicense): uso libre, sin garantías."
+
+#: src/ui/mod.rs:1983
+msgid "Preferences: {}"
+msgstr "Preferencias: {}"
+
+#: src/ui/mod.rs:2009
+msgid "OK"
+msgstr "Aceptar"

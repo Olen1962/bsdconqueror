@@ -13,20 +13,34 @@ use std::fmt::Display;
 use std::sync::{OnceLock, RwLock};
 
 /// Idiomas disponíveis: (código, nome mostrado no menu).
-pub const LANGUAGES: [(&str, &str); 4] = [
+pub const LANGUAGES: [(&str, &str); 7] = [
     ("en", "English"),
-    ("pt", "Português"),
-    ("fr", "Français"),
+    ("es", "Español"),
     ("de", "Deutsch"),
+    ("fr", "Français"),
+    ("it", "Italiano"),
+    ("pl", "Polski"),
+    ("pt", "Português"),
 ];
 
 /// Os ficheiros .po são embebidos no executável: não é preciso instalar nada.
 /// Para acrescentar um idioma: 1) cria po/xx.po; 2) junta-o a PO_FILES;
 /// 3) junta ("xx", "Nome") a LANGUAGES. O inglês não precisa de ficheiro.
 const PT_PO: &str = include_str!("../po/pt.po");
-const FR_PO: &str = include_str!("../po/fr.po");
+const ES_PO: &str = include_str!("../po/es.po");
 const DE_PO: &str = include_str!("../po/de.po");
-const PO_FILES: [(&str, &str); 3] = [("pt", PT_PO), ("fr", FR_PO), ("de", DE_PO)];
+const FR_PO: &str = include_str!("../po/fr.po");
+const PL_PO: &str = include_str!("../po/pl.po");
+const IT_PO: &str = include_str!("../po/it.po");
+
+const PO_FILES: [(&str, &str); 6] = [
+    ("pt", PT_PO),
+    ("es", ES_PO),
+    ("de", DE_PO),
+    ("fr", FR_PO),
+    ("pl", PL_PO),
+    ("it", IT_PO),
+];
 
 struct State {
     lang: String,

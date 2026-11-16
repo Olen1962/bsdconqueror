@@ -235,6 +235,7 @@ enum Icon {
     Add,
     Lock,
     Unlock,
+    Undo,
 }
 
 /// Ícone embebido (src/icons), com tamanho proporcional à letra atual.
@@ -250,6 +251,7 @@ fn ico(ui: &egui::Ui, icon: Icon) -> egui::Image<'static> {
         Icon::Add => egui::include_image!("../icons/add-48x48.png"),
         Icon::Lock => egui::include_image!("../icons/lock-48x48.png"),
         Icon::Unlock => egui::include_image!("../icons/unlock-48x48.png"),
+        Icon::Undo => egui::include_image!("../icons/undo-48x48.png"),
     };
     let sz = ui.text_style_height(&egui::TextStyle::Body) * 1.2;
     egui::Image::new(src).fit_to_exact_size(egui::vec2(sz, sz))
@@ -403,6 +405,23 @@ struct Edit {
     need_focus: bool,
 }
 
+/// Ações dos menus de contexto (botão direito).
+#[derive(Clone, Copy)]
+enum FoundAct {
+    Add,
+    SelectAll,
+}
+
+#[derive(Clone, Copy)]
+enum RowAct {
+    EditValue(usize),
+    EditDesc(usize),
+    ToggleLock(usize),
+    Remove,
+    SelectAll,
+    Clear,
+}
+
 struct Popup {
     title: String,
     msg: String,
@@ -421,6 +440,8 @@ struct WriteItem {
 enum Req {
     Scan { gid: u64, pid: i32, value: i64, widths: Vec<usize>, first: bool },
     Reset,
+    /// Desfaz a última pesquisa (repõe a lista de candidatos anterior).
+    Undo { gid: u64, pid: i32 },
     /// `rows`: linhas afetadas e se estavam com lock (para atualizar o lock).
     Write { gid: u64, rows: Vec<(Key, bool)>, pid: i32, items: Vec<WriteItem> },
     /// Locks (escritas) + leitura de valores atuais, com um único attach.
@@ -431,6 +452,8 @@ enum Req {
 struct ScanOut {
     result: ScanResult,
     prev_count: usize,
+    /// Quantas pesquisas se podem desfazer depois desta operação.
+    history: usize,
 }
 
 struct SyncOut {
@@ -455,6 +478,11 @@ enum Resp {
         gid: u64,
         result: Result<SyncOut, String>,
     },
+    Undo {
+        gid: u64,
+        pid: i32,
+        result: Result<ScanOut, String>,
+    },
 }
 
 fn worker_loop(rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context, cancel: Arc<AtomicBool>) {
@@ -471,8 +499,25 @@ fn worker_loop(rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context, cancel: 
                     sc.perform_next_scan(value, &widths)
                 };
                 let prev_count = sc.candidate_count();
-                let result = result.map(|r| ScanOut { result: r, prev_count });
+                let history = sc.history_len();
+                let result = result.map(|r| ScanOut { result: r, prev_count, history });
                 let _ = tx.send(Resp::Scan { gid, pid, value, first, result });
+            }
+            Req::Undo { gid, pid } => {
+                let _ = sc.attach_to_pid(pid);
+                let result = sc.undo_scan().map(|mut r| {
+                    // O scanner devolve valores a 0: lemos os valores reais das linhas mostradas.
+                    let items: Vec<(u64, usize)> = r.shown.iter().map(|(a, w, _)| (*a, *w)).collect();
+                    if let Ok(vals) = sc.read_values(&items) {
+                        for (row, v) in r.shown.iter_mut().zip(vals) {
+                            if let Some(x) = v {
+                                row.2 = x;
+                            }
+                        }
+                    }
+                    ScanOut { prev_count: sc.candidate_count(), history: sc.history_len(), result: r }
+                });
+                let _ = tx.send(Resp::Undo { gid, pid, result });
             }
             Req::Write { gid, rows, pid, items } => {
                 let _ = sc.attach_to_pid(pid);
@@ -518,6 +563,8 @@ pub struct BSDConquerorApp {
     generation: u64,
     in_flight: usize,
     searching: bool,
+    /// Quantas pesquisas se podem desfazer (0 = botão Undo desligado).
+    undo_depth: usize,
 
     // estado da pesquisa
     scan_has_results: bool,
@@ -618,6 +665,7 @@ impl BSDConquerorApp {
             generation: 0,
             in_flight: 0,
             searching: false,
+            undo_depth: 0,
             scan_has_results: false,
             scan_pid: None,
             locked: HashMap::new(),
@@ -747,6 +795,7 @@ impl BSDConquerorApp {
         self.clear_locks(false);
         self.bump_generation();
         let _ = self.req_tx.send(Req::Reset);
+        self.undo_depth = 0;
         self.scan_has_results = false;
         self.scan_pid = None;
         self.clear_found_view();
@@ -799,6 +848,45 @@ impl BSDConquerorApp {
         self.send_job(Req::Scan { gid, pid, value, widths, first });
     }
 
+    /// Desfaz a última pesquisa.
+    fn on_undo(&mut self) {
+        if self.popup.is_some() || self.searching || self.undo_depth == 0 {
+            return;
+        }
+        let Some(pid) = self.selected_pid else { return };
+        self.searching = true;
+        self.status = tr("Undoing the last search…");
+        let gid = self.generation;
+        self.send_job(Req::Undo { gid, pid });
+    }
+
+    fn finish_undo(&mut self, pid: i32, result: Result<ScanOut, String>) {
+        match result {
+            Ok(out) => {
+                self.undo_depth = out.history;
+                let r = out.result;
+                self.clear_found_view();
+                for (a, w, v) in &r.shown {
+                    self.found_rows.push(Row {
+                        addr: *a,
+                        width: *w,
+                        description: String::new(),
+                        value: v.to_string(),
+                        locked: false,
+                    });
+                }
+                self.found_total = r.total;
+                self.scan_has_results = r.total > 0;
+                self.scan_pid = if r.total > 0 { Some(pid) } else { None };
+                self.status = trf("Undone: {} addresses restored.", &[&r.total]);
+                self.sync_now = true;
+            }
+            Err(e) => {
+                self.show_alert(tr("BSDConqueror - Execution error"), trf("Error: {}", &[&e]));
+            }
+        }
+    }
+
     fn clear_found_view(&mut self) {
         self.found_rows.clear();
         self.found_selected.clear();
@@ -817,6 +905,7 @@ impl BSDConquerorApp {
         let mode = if first { tr("Search") } else { tr("Next Search") };
         match result {
             Ok(out) => {
+                self.undo_depth = out.history;
                 let r = out.result;
                 if r.kept_previous {
                     // Nenhum candidato com este valor: os anteriores mantêm-se.
@@ -964,6 +1053,13 @@ impl BSDConquerorApp {
                     }
                     self.searching = false;
                     self.finish_scan(pid, value, first, result);
+                }
+                Resp::Undo { gid, pid, result } => {
+                    if gid != self.generation {
+                        continue;
+                    }
+                    self.searching = false;
+                    self.finish_undo(pid, result);
                 }
                 Resp::Write { gid, rows, results } => {
                     if gid != self.generation {
@@ -1136,6 +1232,7 @@ impl BSDConquerorApp {
         self.clear_locks(false);
         self.bump_generation();
         let _ = self.req_tx.send(Req::Reset);
+        self.undo_depth = 0;
         self.scan_has_results = false;
         self.scan_pid = None;
         self.clear_found_view();
@@ -1157,16 +1254,11 @@ impl BSDConquerorApp {
         self.selected_rows = (0..self.result_rows.len()).collect();
     }
 
-    fn click_row(&mut self, i: usize, ctrl: bool, shift: bool) {
-        // Clique simples numa linha já selecionada (multisseleção) mantém a seleção,
-        // para o duplo clique / F2 editarem todas as linhas de uma vez.
-        if !ctrl && !shift && self.selected_rows.len() > 1 && self.selected_rows.contains(&i) {
-            self.cursor = Some(i);
-            return;
-        }
-        apply_click(&mut self.selected_rows, &mut self.anchor, i, ctrl, shift);
-        self.cursor = Some(i);
-    }
+    // DEPOIS:
+	fn click_row(&mut self, i: usize, ctrl: bool, shift: bool) {
+	    apply_click(&mut self.selected_rows, &mut self.anchor, i, ctrl, shift);
+	    self.cursor = Some(i);
+	}
 
     fn click_found(&mut self, i: usize, ctrl: bool, shift: bool) {
         apply_click(&mut self.found_selected, &mut self.found_anchor, i, ctrl, shift);
@@ -1280,6 +1372,7 @@ impl BSDConquerorApp {
         let mods = ui.input(|i| i.modifiers);
         let mut click: Option<(usize, bool, bool)> = None;
         let mut dbl: Option<usize> = None;
+        let mut fact: Option<FoundAct> = None;
         let hdr = [tr("Address"), tr("Type"), tr("Value")];
         let (_, hr) =
             draw_row(ui, &w, &[hdr[0].as_str(), hdr[1].as_str(), hdr[2].as_str()], &[false; 3], false, false, true);
@@ -1299,6 +1392,29 @@ impl BSDConquerorApp {
                     i % 2 == 1,
                     false,
                 );
+                if resp.secondary_clicked() && !sel {
+                    click = Some((i, false, false)); // o botão direito seleciona a linha
+                }
+                resp.clone().context_menu(|ui| {
+                    if ui.button(tr("Add to list")).clicked() {
+                        fact = Some(FoundAct::Add);
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button(tr("Copy address")).clicked() {
+                        ui.ctx().copy_text(a.clone());
+                        ui.close_menu();
+                    }
+                    if ui.button(tr("Copy value")).clicked() {
+                        ui.ctx().copy_text(row.value.clone());
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.add(egui::Button::new(tr("Select all")).shortcut_text("Ctrl+A")).clicked() {
+                        fact = Some(FoundAct::SelectAll);
+                        ui.close_menu();
+                    }
+                });
                 if resp.double_clicked() {
                     dbl = Some(i);
                 } else if resp.clicked() {
@@ -1314,6 +1430,11 @@ impl BSDConquerorApp {
         }
         if add_clicked {
             self.add_selected_found();
+        }
+        match fact {
+            Some(FoundAct::Add) => self.add_selected_found(),
+            Some(FoundAct::SelectAll) => self.found_selected = (0..self.found_rows.len()).collect(),
+            None => {}
         }
     }
 
@@ -1341,6 +1462,7 @@ impl BSDConquerorApp {
         // Tabela de processos
         let q = self.process_filter.trim().to_lowercase();
         let mut clicked: Option<ProcessInfo> = None;
+        let mut refresh_req = false;
         let mut new_sort: Option<usize> = None;
         let k = UI_SCALE;
         let pw = [self.col_proc[0] * k, self.col_proc[1] * k, 0.0];
@@ -1410,10 +1532,36 @@ impl BSDConquerorApp {
                         if resp.clicked() {
                             clicked = Some(p.clone());
                         }
+                        resp.clone().context_menu(|ui| {
+                            if ui.button(tr("Select this process")).clicked() {
+                                clicked = Some(p.clone());
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            if ui.button(tr("Copy PID")).clicked() {
+                                ui.ctx().copy_text(p.pid.to_string());
+                                ui.close_menu();
+                            }
+                            if ui.button(tr("Copy name")).clicked() {
+                                ui.ctx().copy_text(p.command.clone());
+                                ui.close_menu();
+                            }
+                            ui.separator();
+                            if ui
+                                .add(egui::Button::new(tr("Refresh processes")).shortcut_text("F5"))
+                                .clicked()
+                            {
+                                refresh_req = true;
+                                ui.close_menu();
+                            }
+                        });
                         n += 1;
                     }
                 });
         });
+        if refresh_req {
+            self.refresh_processes();
+        }
         if let Some(c) = new_sort {
             if self.sort_col == c {
                 self.sort_asc = !self.sort_asc;
@@ -1442,7 +1590,7 @@ impl BSDConquerorApp {
         // Linha de valor
         ui.horizontal(|ui| {
             ui.label(tr("Value:"));
-            let w = (ui.available_width() - 200.0).max(60.0);
+            let w = (ui.available_width() - 330.0).max(60.0);
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.value_input)
                     .hint_text(tr("Integer value, e.g. 123456"))
@@ -1458,6 +1606,14 @@ impl BSDConquerorApp {
             let search_btn = egui::Button::image_and_text(ico(ui, Icon::Search), label);
             if ui.add_enabled(can, search_btn).clicked() || (enter && can) {
                 self.on_search();
+            }
+            let undo_btn = egui::Button::image_and_text(ico(ui, Icon::Undo), tr("Undo"));
+            if ui
+                .add_enabled(self.undo_depth > 0 && !self.searching, undo_btn)
+                .on_hover_text(tr("Undo last search"))
+                .clicked()
+            {
+                self.on_undo();
             }
             if ui
                 .add(egui::Button::image_and_text(ico(ui, Icon::Reset), tr("Reset")))
@@ -1521,6 +1677,7 @@ impl BSDConquerorApp {
         let mut start_edit: Option<(usize, EditCol)> = None;
         let mut commit: Option<(usize, EditCol, String)> = None;
         let mut cancel = false;
+        let mut ract: Option<RowAct> = None;
 
         let cr = self.col_results;
         let w = [cr[0] * k, cr[1] * k, cr[2] * k, cr[3] * k, 0.0];
@@ -1543,6 +1700,9 @@ impl BSDConquerorApp {
                 ui.add_space(8.0);
                 ui.weak(tr("Select rows in the Found list and use \"Add Selected\" (or double-click a row) to bring them here."));
             }
+            // Zona vazia da lista: tem o seu próprio menu (criada antes das linhas, que ficam por cima).
+            let bg_rect = ui.available_rect_before_wrap();
+            let bg = ui.interact(bg_rect, ui.id().with("lower_bg"), egui::Sense::click());
             for i in 0..self.result_rows.len() {
                 let sel = self.selected_rows.contains(&i);
                 let row = &self.result_rows[i];
@@ -1568,6 +1728,44 @@ impl BSDConquerorApp {
                 if ui.put(rects[0], egui::ImageButton::new(lock_img).frame(false)).clicked() {
                     toggle = Some(i);
                 }
+
+                if resp.secondary_clicked() && !sel {
+                    click = Some((i, false, false)); // o botão direito seleciona a linha
+                }
+                resp.clone().context_menu(|ui| {
+                    if ui.add(egui::Button::new(tr("Edit value")).shortcut_text("F2")).clicked() {
+                        ract = Some(RowAct::EditValue(i));
+                        ui.close_menu();
+                    }
+                    if ui.button(tr("Edit description")).clicked() {
+                        ract = Some(RowAct::EditDesc(i));
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    let lock_text = if row.locked { tr("Unlock value") } else { tr("Lock value") };
+                    if ui.button(lock_text).clicked() {
+                        ract = Some(RowAct::ToggleLock(i));
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.button(tr("Copy address")).clicked() {
+                        ui.ctx().copy_text(addr_t.clone());
+                        ui.close_menu();
+                    }
+                    if ui.button(tr("Copy value")).clicked() {
+                        ui.ctx().copy_text(row.value.clone());
+                        ui.close_menu();
+                    }
+                    ui.separator();
+                    if ui.add(egui::Button::new(tr("Remove")).shortcut_text("Del")).clicked() {
+                        ract = Some(RowAct::Remove);
+                        ui.close_menu();
+                    }
+                    if ui.add(egui::Button::new(tr("Select all")).shortcut_text("Ctrl+A")).clicked() {
+                        ract = Some(RowAct::SelectAll);
+                        ui.close_menu();
+                    }
+                });
 
                 if let Some(e) = editing.as_mut() {
                     if e.row == i {
@@ -1613,6 +1811,16 @@ impl BSDConquerorApp {
                     }
                 }
             }
+            bg.context_menu(|ui| {
+                if ui.add(egui::Button::new(tr("Select all")).shortcut_text("Ctrl+A")).clicked() {
+                    ract = Some(RowAct::SelectAll);
+                    ui.close_menu();
+                }
+                if ui.button(tr("Clear list")).clicked() {
+                    ract = Some(RowAct::Clear);
+                    ui.close_menu();
+                }
+            });
         });
 
         self.editing = editing;
@@ -1635,6 +1843,15 @@ impl BSDConquerorApp {
         if let Some((i, ctrl, shift)) = click {
             self.click_row(i, ctrl, shift);
         }
+        match ract {
+            Some(RowAct::EditValue(i)) => self.begin_edit(i, EditCol::Value),
+            Some(RowAct::EditDesc(i)) => self.begin_edit(i, EditCol::Desc),
+            Some(RowAct::ToggleLock(i)) => self.on_lock_toggled(i),
+            Some(RowAct::Remove) => self.remove_selected(),
+            Some(RowAct::SelectAll) => self.select_all(),
+            Some(RowAct::Clear) => self.on_clear(),
+            None => {}
+        }
     }
 
     /// Barra de menus (File, Search, List, View, Help).
@@ -1651,9 +1868,11 @@ impl BSDConquerorApp {
             ZoomOut,
             ZoomReset,
             About,
+            Undo,
             Lang(&'static str),
         }
         let mut act: Option<Act> = None;
+        let can_undo = self.undo_depth > 0 && !self.searching;
         egui::TopBottomPanel::top("menu_bar").show(ctx, |ui| {
             egui::menu::bar(ui, |ui| {
                 ui.menu_button(tr("File"), |ui| {
@@ -1671,6 +1890,16 @@ impl BSDConquerorApp {
                     }
                 });
                 ui.menu_button(tr("Search"), |ui| {
+                    if ui
+                        .add_enabled(
+                            can_undo,
+                            egui::Button::new(tr("Undo last search")).shortcut_text("Ctrl+Z"),
+                        )
+                        .clicked()
+                    {
+                        act = Some(Act::Undo);
+                        ui.close_menu();
+                    }
                     if ui.button(tr("Reset search")).clicked() {
                         act = Some(Act::Reset);
                         ui.close_menu();
@@ -1729,6 +1958,7 @@ impl BSDConquerorApp {
             Some(Act::Refresh) => self.refresh_processes(),
             Some(Act::Quit) => ctx.send_viewport_cmd(egui::ViewportCommand::Close),
             Some(Act::Reset) => self.on_reset(),
+            Some(Act::Undo) => self.on_undo(),
             Some(Act::SelectAll) => self.select_all(),
             Some(Act::Remove) => self.remove_selected(),
             Some(Act::Clear) => self.on_clear(),
@@ -1737,7 +1967,7 @@ impl BSDConquerorApp {
             Some(Act::ZoomReset) => ctx.set_zoom_factor(1.0),
             Some(Act::About) => {
                 let cfg = Prefs::path()
-                    .map(|p| p.display().to_string())
+                    .map(|_| "\n$HOME/.config/bsdconqueror/config.ini".to_string())
                     .unwrap_or_else(|| tr("(unavailable)"));
                 let text = format!(
                     "BSDConqueror {}\n\n{}\n{}\n\n{}\n\n{}",
@@ -1749,6 +1979,7 @@ impl BSDConquerorApp {
                 );
                 self.show_alert(tr("About BSDConqueror"), text);
             }
+
             Some(Act::Lang(code)) => i18n::set_language(code),
             None => {}
         }
@@ -1845,6 +2076,9 @@ impl eframe::App for BSDConquerorApp {
         if self.popup.is_none() && !ctx.wants_keyboard_input() {
             if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::A)) {
                 self.select_all();
+            }
+            if ctx.input(|i| i.modifiers.command && i.key_pressed(egui::Key::Z)) {
+                self.on_undo();
             }
             if ctx.input(|i| i.key_pressed(egui::Key::F2)) {
                 self.begin_edit_cursor();

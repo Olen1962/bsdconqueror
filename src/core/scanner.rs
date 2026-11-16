@@ -137,6 +137,10 @@ pub const ALL_WIDTHS: [usize; 4] = [1, 2, 4, 8];
 pub const SHOW_LIMIT: usize = 20;
 const MAX_CANDIDATES: usize = 16_000_000;
 const CHUNK: usize = 1 << 20;
+/// Quantas listas de candidatos anteriores se guardam para o "Undo".
+const HISTORY_DEPTH: usize = 5;
+/// Listas maiores do que isto não se guardam (ocupariam demasiada memória).
+const HISTORY_MAX_CANDIDATES: usize = 2_000_000;
 /// Bytes lidos a mais em cada bloco, para apanhar valores entre dois blocos.
 const OVERLAP: usize = 7;
 
@@ -282,6 +286,8 @@ pub fn list_processes() -> Vec<ProcessInfo> {
 pub struct MemoryScanner {
     pub target_pid: Option<i32>,
     candidates: Vec<u64>,
+    /// Listas de candidatos anteriores (a última é a mais recente), para o Undo.
+    history: Vec<Vec<u64>>,
     cancel: Arc<AtomicBool>,
 }
 
@@ -293,7 +299,7 @@ impl MemoryScanner {
 
     /// `cancel`: quando passa a `true`, pesquisas longas terminam com erro.
     pub fn with_cancel(cancel: Arc<AtomicBool>) -> Self {
-        Self { target_pid: None, candidates: Vec::new(), cancel }
+        Self { target_pid: None, candidates: Vec::new(), history: Vec::new(), cancel }
     }
 
     fn cancelled(&self) -> bool {
@@ -303,6 +309,7 @@ impl MemoryScanner {
     pub fn attach_to_pid(&mut self, pid: i32) -> Result<(), String> {
         if self.target_pid != Some(pid) {
             self.candidates.clear();
+            self.history.clear(); // o histórico pertence ao processo anterior
         }
         self.target_pid = Some(pid);
         Ok(())
@@ -310,6 +317,36 @@ impl MemoryScanner {
 
     pub fn reset_scan(&mut self) {
         self.candidates.clear();
+        self.history.clear();
+    }
+
+    /// Guarda a lista atual no histórico, antes de ela ser substituída.
+    fn remember(&mut self) {
+        if self.candidates.is_empty() {
+            return;
+        }
+        if self.candidates.len() > HISTORY_MAX_CANDIDATES {
+            // Não dá para voltar a esta lista; as mais antigas deixariam de ser consistentes.
+            self.history.clear();
+            return;
+        }
+        if self.history.len() >= HISTORY_DEPTH {
+            self.history.remove(0);
+        }
+        self.history.push(self.candidates.clone());
+    }
+
+    /// Quantas pesquisas se podem desfazer.
+    pub fn history_len(&self) -> usize {
+        self.history.len()
+    }
+
+    /// Desfaz a última pesquisa: repõe a lista de candidatos anterior.
+    /// Os valores devolvidos são 0; quem chama deve lê-los da memória.
+    pub fn undo_scan(&mut self) -> Result<ScanResult, String> {
+        let prev = self.history.pop().ok_or("Nada para desfazer.")?;
+        self.candidates = prev;
+        Ok(self.build_result(0, false))
     }
 
     pub fn candidate_count(&self) -> usize {
@@ -499,6 +536,7 @@ impl MemoryScanner {
             }
         }
         drop(att);
+        self.remember();
         self.candidates = found;
         Ok(self.build_result(value, truncated))
     }
@@ -544,6 +582,7 @@ impl MemoryScanner {
             });
         }
 
+        self.remember();
         self.candidates = keep;
         let mut r = self.build_result(value, false);
         r.sample = sample;

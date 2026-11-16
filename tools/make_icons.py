@@ -25,6 +25,7 @@ GRAY = "#9fb3c8"
 PALE = "#e8f1fb"
 PINK = "#f08c8c"
 WHITE = "#ffffff"
+PURPLE = "#7d4fc3"
 
 VB = 32          # as formas são desenhadas num quadrado de 32 x 32 unidades
 SS = 16          # sobre-amostragem para suavizar as arestas
@@ -191,6 +192,17 @@ def icon_unlock():
     ] + _padlock_body(GRAY)
 
 
+def icon_undo():
+    # seta em "U": cabeça à esquerda, curva à direita, regresso por baixo
+    cx, cy, r = 17, 17, 7.5
+    return [
+        arc(cx, cy, r, -90, 90, PURPLE, 3.4),
+        line([(cx, cy - r), (11, cy - r)], PURPLE, 3.4),
+        line([(cx, cy + r), (10, cy + r)], PURPLE, 3.4),
+        arrow_head(11, cy - r, -1, 0, 4.6, PURPLE),
+    ]
+
+
 def icon_app():
     return [
         rrect(1.5, 1.5, 30.5, 30.5, 7, fill=BLUE),
@@ -210,6 +222,7 @@ ICONS = {
     "clear": icon_clear,
     "lock": icon_lock,
     "unlock": icon_unlock,
+    "undo": icon_undo,
 }
 
 

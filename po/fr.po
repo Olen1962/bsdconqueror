@@ -295,3 +295,47 @@ msgstr "Préférences : {}"
 
 msgid "OK"
 msgstr "OK"
+
+# ── Menu de contexto (botão direito) ──
+msgid "Select this process"
+msgstr "Sélectionner ce processus"
+
+msgid "Copy PID"
+msgstr "Copier le PID"
+
+msgid "Copy name"
+msgstr "Copier le nom"
+
+msgid "Add to list"
+msgstr "Ajouter à la liste"
+
+msgid "Copy address"
+msgstr "Copier l'adresse"
+
+msgid "Copy value"
+msgstr "Copier la valeur"
+
+msgid "Edit value"
+msgstr "Modifier la valeur"
+
+msgid "Edit description"
+msgstr "Modifier la description"
+
+msgid "Lock value"
+msgstr "Verrouiller la valeur"
+
+msgid "Unlock value"
+msgstr "Déverrouiller la valeur"
+
+# ── Undo ──
+msgid "Undo"
+msgstr "Annuler"
+
+msgid "Undo last search"
+msgstr "Annuler la dernière recherche"
+
+msgid "Undoing the last search…"
+msgstr "Annulation de la dernière recherche…"
+
+msgid "Undone: {} addresses restored."
+msgstr "Annulé : {} adresses restaurées."

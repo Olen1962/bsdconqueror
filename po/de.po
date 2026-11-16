@@ -295,3 +295,47 @@ msgstr "Einstellungen: {}"
 
 msgid "OK"
 msgstr "OK"
+
+# ── Kontextmenü (rechte Maustaste) ──
+msgid "Select this process"
+msgstr "Diesen Prozess auswählen"
+
+msgid "Copy PID"
+msgstr "PID kopieren"
+
+msgid "Copy name"
+msgstr "Namen kopieren"
+
+msgid "Add to list"
+msgstr "Zur Liste hinzufügen"
+
+msgid "Copy address"
+msgstr "Adresse kopieren"
+
+msgid "Copy value"
+msgstr "Wert kopieren"
+
+msgid "Edit value"
+msgstr "Wert bearbeiten"
+
+msgid "Edit description"
+msgstr "Beschreibung bearbeiten"
+
+msgid "Lock value"
+msgstr "Wert sperren"
+
+msgid "Unlock value"
+msgstr "Wert entsperren"
+
+# ── Undo ──
+msgid "Undo"
+msgstr "Rückgängig"
+
+msgid "Undo last search"
+msgstr "Letzte Suche rückgängig machen"
+
+msgid "Undoing the last search…"
+msgstr "Letzte Suche wird rückgängig gemacht…"
+
+msgid "Undone: {} addresses restored."
+msgstr "Rückgängig gemacht: {} Adressen wiederhergestellt."
