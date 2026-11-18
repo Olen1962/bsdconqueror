@@ -91,7 +91,7 @@ O programa anexa-se ao processo com `ptrace` (`PT_ATTACH`), lê e escreve a mem�
 ## Preferências
 
 Ficam em `~/.config/bsdconqueror/config.ini` (ou em `$XDG_CONFIG_HOME/bsdconqueror/`).
-É um ficheiro de texto simples. Para repor os valores por omissão, apaga-o.
+É um ficheiro de texto simples. Para repor os valores por omissão, elimina-o.
 
 ## Limitações conhecidas
 
@@ -129,7 +129,6 @@ A interface não bloqueia: o scanner corre numa thread própria e comunica por c
 | Versão | Descrição |
 |---|---|
 | 0.20.0 | Scanner nativo (`ptrace`/`procstat`), sem scanmem |
-| 0.12.x | Versão com scanmem (etiqueta `scanmem-final`) |
 
 ## Licença
 
