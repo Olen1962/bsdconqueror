@@ -5,7 +5,6 @@ em Rust (egui/eframe). Funciona só com ferramentas **nativas do sistema**: `ps`
 `procstat` e `ptrace(2)`. Não precisa de `scanmem` nem de nenhum programa externo.
 
 > Inspirado no GameConqueror/scanmem, mas escrito de raiz para o FreeBSD.
-> Versões anteriores à 0.20 usavam o scanmem; a última delas está na etiqueta `scanmem-final`.
 
 ## Para que serve
 
