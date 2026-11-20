@@ -125,15 +125,59 @@ pub struct MemoryMap {
     pub path: String,
 }
 
-pub struct ScanResult {
-    pub total: usize,
-    pub shown: Vec<(u64, usize, i64)>,
-    pub truncated: bool,
-    pub kept_previous: bool,
-    pub sample: Vec<i64>,
+/// Valor numérico: inteiro ou vírgula flutuante (f32/f64).
+#[derive(Clone, Copy, Debug, PartialEq)]
+pub enum Num {
+    Int(i64),
+    F32(f32),
+    F64(f64),
 }
 
-pub const ALL_WIDTHS: [usize; 4] = [1, 2, 4, 8];
+impl Num {
+    pub fn as_f64(self) -> f64 {
+        match self {
+            Num::Int(i) => i as f64,
+            Num::F32(f) => f as f64,
+            Num::F64(f) => f,
+        }
+    }
+
+    /// Valor como inteiro, se for exatamente um (p.ex. 100 ou 100.0).
+    pub fn as_int(self) -> Option<i64> {
+        match self {
+            Num::Int(i) => Some(i),
+            Num::F32(_) | Num::F64(_) => {
+                let f = self.as_f64();
+                if f.is_finite() && f.fract() == 0.0 && f.abs() < 9.0e18 {
+                    Some(f as i64)
+                } else {
+                    None
+                }
+            }
+        }
+    }
+}
+
+impl std::fmt::Display for Num {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Num::Int(i) => write!(f, "{}", i),
+            Num::F32(x) => write!(f, "{}", x), // f32 mostra "0.1", não "0.10000000149…"
+            Num::F64(x) => write!(f, "{}", x),
+        }
+    }
+}
+
+pub struct ScanResult {
+    pub total: usize,
+    pub shown: Vec<(u64, usize, Num)>,
+    pub truncated: bool,
+    pub kept_previous: bool,
+    pub sample: Vec<Num>,
+}
+
+/// Larguras: 1, 2, 4, 8 = inteiros (bytes); 5 = float32 (4 bytes); 6 = double (8 bytes).
+pub const ALL_WIDTHS: [usize; 6] = [1, 2, 4, 5, 6, 8];
 pub const SHOW_LIMIT: usize = 20;
 const MAX_CANDIDATES: usize = 16_000_000;
 const CHUNK: usize = 1 << 20;
@@ -144,15 +188,18 @@ const HISTORY_MAX_CANDIDATES: usize = 2_000_000;
 /// Bytes lidos a mais em cada bloco, para apanhar valores entre dois blocos.
 const OVERLAP: usize = 7;
 
-const TAG_SHIFT: u32 = 62;
+// 3 bits de etiqueta (0..=5) nos bits altos do endereço.
+const TAG_SHIFT: u32 = 61;
 const ADDR_MASK: u64 = (1u64 << TAG_SHIFT) - 1;
 
 fn tag_of(width: usize) -> usize {
     match width {
         1 => 0,
         2 => 1,
-        4 => 2,
-        _ => 3,
+        4 => 2, // inteiro de 4 bytes
+        5 => 3, // float32
+        6 => 4, // double
+        _ => 5, // 8 bytes inteiro
     }
 }
 
@@ -165,45 +212,76 @@ fn unpack(p: u64) -> (u64, usize) {
         0 => 1,
         1 => 2,
         2 => 4,
+        3 => 5,
+        4 => 6,
         _ => 8,
     };
     (p & ADDR_MASK, w)
 }
 
-fn pattern(value: i64, width: usize) -> Result<Vec<u8>, String> {
-    let (min, max): (i64, i64) = match width {
-        1 => (-128, 255),
-        2 => (-32_768, 65_535),
-        4 => (-2_147_483_648, 4_294_967_295),
-        8 => (i64::MIN, i64::MAX),
-        _ => return Err(format!("Largura de {} bytes não suportada.", width)),
-    };
-    if value < min || value > max {
-        return Err(format!(
-            "O valor {} está fora do intervalo de {} byte(s) ({} a {}).",
-            value, width, min, max
-        ));
-    }
-    let full = value.to_ne_bytes();
-    Ok(if cfg!(target_endian = "little") {
-        full[..width].to_vec()
-    } else {
-        full[8 - width..].to_vec()
-    })
-}
-
-fn decode(b: &[u8]) -> i64 {
-    match b.len() {
-        1 => b[0] as i8 as i64,
-        2 => i16::from_ne_bytes([b[0], b[1]]) as i64,
-        4 => i32::from_ne_bytes([b[0], b[1], b[2], b[3]]) as i64,
-        8 => i64::from_ne_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]]),
-        _ => 0,
+/// Número de bytes que a largura `width` ocupa na memória (5 = f32 -> 4, 6 = f64 -> 8).
+fn byte_len(width: usize) -> usize {
+    match width {
+        1 => 1,
+        2 => 2,
+        4 | 5 => 4,
+        _ => 8,
     }
 }
 
-fn build_patterns(value: i64, widths: &[usize]) -> Result<[Option<Vec<u8>>; 4], String> {
-    let mut pats: [Option<Vec<u8>>; 4] = [None, None, None, None];
+fn pattern(value: Num, width: usize) -> Result<Vec<u8>, String> {
+    match width {
+        1 | 2 | 4 | 8 => {
+            let v = value
+                .as_int()
+                .ok_or_else(|| format!("O valor {} não é um inteiro.", value))?;
+            match width {
+                1 => {
+                    if !(-128..=255).contains(&v) {
+                        return Err(format!("Valor {} fora do intervalo de 1 byte (-128 a 255).", v));
+                    }
+                    Ok(v.to_ne_bytes()[..1].to_vec())
+                }
+                2 => {
+                    if !(-32_768..=65_535).contains(&v) {
+                        return Err(format!("Valor {} fora do intervalo de 2 bytes (-32768 a 65535).", v));
+                    }
+                    Ok(v.to_ne_bytes()[..2].to_vec())
+                }
+                4 => {
+                    if v < i32::MIN as i64 || v > i32::MAX as i64 {
+                        return Err(format!("Valor {} fora do intervalo de 4 bytes (inteiro com sinal).", v));
+                    }
+                    Ok((v as i32).to_ne_bytes().to_vec())
+                }
+                _ => Ok(v.to_ne_bytes().to_vec()),
+            }
+        }
+        5 => {
+            let f = value.as_f64() as f32;
+            if value.as_f64().is_finite() && !f.is_finite() {
+                return Err(format!("Valor {} fora do intervalo de um float de 4 bytes.", value));
+            }
+            Ok(f.to_ne_bytes().to_vec())
+        }
+        6 => Ok(value.as_f64().to_ne_bytes().to_vec()),
+        _ => Err(format!("Largura de {} bytes não suportada.", width)),
+    }
+}
+
+fn decode(b: &[u8], width: usize) -> Num {
+    match width {
+        1 => Num::Int(b[0] as i8 as i64),
+        2 => Num::Int(i16::from_ne_bytes([b[0], b[1]]) as i64),
+        4 => Num::Int(i32::from_ne_bytes([b[0], b[1], b[2], b[3]]) as i64),
+        5 => Num::F32(f32::from_ne_bytes([b[0], b[1], b[2], b[3]])),
+        6 => Num::F64(f64::from_ne_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])),
+        _ => Num::Int(i64::from_ne_bytes([b[0], b[1], b[2], b[3], b[4], b[5], b[6], b[7]])),
+    }
+}
+
+fn build_patterns(value: Num, widths: &[usize]) -> Result<[Option<Vec<u8>>; 6], String> {
+    let mut pats: [Option<Vec<u8>>; 6] = [None, None, None, None, None, None];
     let mut first_err: Option<String> = None;
     for &w in widths {
         match pattern(value, w) {
@@ -222,13 +300,13 @@ fn build_patterns(value: i64, widths: &[usize]) -> Result<[Option<Vec<u8>>; 4], 
 }
 
 /// Lê vários valores com um attach já feito.
-fn read_with(att: &Attached, items: &[(u64, usize)]) -> Vec<Option<i64>> {
+fn read_with(att: &Attached, items: &[(u64, usize)]) -> Vec<Option<Num>> {
     let mut out = Vec::with_capacity(items.len());
     let mut b = [0u8; 8];
     for &(addr, w) in items {
-        let w = if matches!(w, 1 | 2 | 4 | 8) { w } else { 4 };
-        match att.read(addr, &mut b[..w]) {
-            Ok(n) if n == w => out.push(Some(decode(&b[..w]))),
+        let n = byte_len(w);
+        match att.read(addr, &mut b[..n]) {
+            Ok(got) if got == n => out.push(Some(decode(&b[..n], w))),
             _ => out.push(None),
         }
     }
@@ -236,7 +314,7 @@ fn read_with(att: &Attached, items: &[(u64, usize)]) -> Vec<Option<i64>> {
 }
 
 /// Escreve vários valores com um attach já feito.
-fn write_with(att: &Attached, items: &[(u64, usize, i64)]) -> Vec<Result<(), String>> {
+fn write_with(att: &Attached, items: &[(u64, usize, Num)]) -> Vec<Result<(), String>> {
     items
         .iter()
         .map(|&(addr, w, v)| -> Result<(), String> {
@@ -346,7 +424,7 @@ impl MemoryScanner {
     pub fn undo_scan(&mut self) -> Result<ScanResult, String> {
         let prev = self.history.pop().ok_or("Nada para desfazer.")?;
         self.candidates = prev;
-        Ok(self.build_result(0, false))
+        Ok(self.build_result(Num::Int(0), false))
     }
 
     pub fn candidate_count(&self) -> usize {
@@ -394,14 +472,14 @@ impl MemoryScanner {
     }
 
     #[allow(dead_code)]
-    pub fn read_values(&self, items: &[(u64, usize)]) -> Result<Vec<Option<i64>>, String> {
+    pub fn read_values(&self, items: &[(u64, usize)]) -> Result<Vec<Option<Num>>, String> {
         let pid = self.target_pid.ok_or("Nenhum processo selecionado!")?;
         let att = Attached::new(pid)?;
         Ok(read_with(&att, items))
     }
 
     #[allow(dead_code)]
-    pub fn write_value(&self, addr: u64, width: usize, value: i64) -> Result<(), String> {
+    pub fn write_value(&self, addr: u64, width: usize, value: Num) -> Result<(), String> {
         let pid = self.target_pid.ok_or("Nenhum processo selecionado!")?;
         let pat = pattern(value, width)?;
         let att = Attached::new(pid)?;
@@ -411,7 +489,7 @@ impl MemoryScanner {
 
     /// Várias escritas com um único attach. O erro externo só ocorre se o
     /// attach falhar; cada escrita tem o seu próprio resultado.
-    pub fn write_values(&self, items: &[(u64, usize, i64)]) -> Result<Vec<Result<(), String>>, String> {
+    pub fn write_values(&self, items: &[(u64, usize, Num)]) -> Result<Vec<Result<(), String>>, String> {
         let pid = self.target_pid.ok_or("Nenhum processo selecionado!")?;
         let att = Attached::new(pid)?;
         Ok(write_with(&att, items))
@@ -421,9 +499,9 @@ impl MemoryScanner {
     #[allow(clippy::type_complexity)]
     pub fn sync(
         &self,
-        writes: &[(u64, usize, i64)],
+        writes: &[(u64, usize, Num)],
         reads: &[(u64, usize)],
-    ) -> Result<(Vec<Result<(), String>>, Vec<Option<i64>>), String> {
+    ) -> Result<(Vec<Result<(), String>>, Vec<Option<Num>>), String> {
         let pid = self.target_pid.ok_or("Nenhum processo selecionado!")?;
         let att = Attached::new(pid)?;
         let w = write_with(&att, writes);
@@ -435,7 +513,7 @@ impl MemoryScanner {
     /// Se o mesmo endereço aparece com várias larguras (p.ex. 2 e 4 bytes,
     /// porque o valor cabe nas duas), mostra-se só a mais estreita. Os candidatos
     /// guardados não são alterados: a pesquisa seguinte continua a usar todos.
-    fn build_result(&self, value: i64, truncated: bool) -> ScanResult {
+    fn build_result(&self, value: Num, truncated: bool) -> ScanResult {
         let mut order: Vec<u64> = Vec::new();
         let mut min_width: HashMap<u64, usize> = HashMap::new();
         for p in &self.candidates {
@@ -463,7 +541,7 @@ impl MemoryScanner {
         }
     }
 
-    pub fn perform_first_scan(&mut self, value: i64, widths: &[usize]) -> Result<ScanResult, String> {
+    pub fn perform_first_scan(&mut self, value: Num, widths: &[usize]) -> Result<ScanResult, String> {
         let pid = self.target_pid.ok_or("Nenhum processo selecionado!")?;
         let tags = build_patterns(value, widths)?;
         let pats: Vec<(usize, &Vec<u8>)> = ALL_WIDTHS
@@ -507,8 +585,9 @@ impl MemoryScanner {
                     }
                 };
                 let hay = &buf[..got];
-                for (w, pat) in &pats {
-                    let w = *w;
+                for (code, pat) in &pats {
+                    let w = pat.len();
+                    let code = *code;
                     if got < w {
                         continue;
                     }
@@ -521,7 +600,7 @@ impl MemoryScanner {
                             Some(p) => {
                                 i += p;
                                 if &hay[i..i + w] == pat.as_slice() {
-                                    found.push(pack(addr + i as u64, w));
+                                    found.push(pack(addr + i as u64, code));
                                     if found.len() >= MAX_CANDIDATES {
                                         truncated = true;
                                         break 'regions;
@@ -541,7 +620,7 @@ impl MemoryScanner {
         Ok(self.build_result(value, truncated))
     }
 
-    pub fn perform_next_scan(&mut self, value: i64, widths: &[usize]) -> Result<ScanResult, String> {
+    pub fn perform_next_scan(&mut self, value: Num, widths: &[usize]) -> Result<ScanResult, String> {
         let pid = self.target_pid.ok_or("Nenhum processo selecionado!")?;
         if self.candidates.is_empty() {
             return Err("Não há endereços anteriores.".to_string());
@@ -549,7 +628,7 @@ impl MemoryScanner {
         let pats = build_patterns(value, widths)?;
         let att = Attached::new(pid)?;
         let mut keep: Vec<u64> = Vec::with_capacity(self.candidates.len().min(1 << 16));
-        let mut sample: Vec<i64> = Vec::new();
+        let mut sample: Vec<Num> = Vec::new();
         let mut b = [0u8; 8];
 
         for (n, &p) in self.candidates.iter().enumerate() {
@@ -558,12 +637,13 @@ impl MemoryScanner {
             }
             let (addr, w) = unpack(p);
             let Some(pat) = &pats[tag_of(w)] else { continue };
-            match att.read(addr, &mut b[..w]) {
-                Ok(got) if got == w => {
+            let n = byte_len(w);
+            match att.read(addr, &mut b[..n]) {
+                Ok(got) if got == n => {
                     if sample.len() < 5 {
-                        sample.push(decode(&b[..w]));
+                        sample.push(decode(&b[..n], w));
                     }
-                    if &b[..w] == pat.as_slice() {
+                    if &b[..n] == pat.as_slice() {
                         keep.push(p);
                     }
                 }

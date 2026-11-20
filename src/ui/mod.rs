@@ -8,7 +8,7 @@
 //! A interface só envia pedidos (`Req`) e recebe respostas (`Resp`) por canais,
 //! por isso a janela nunca bloqueia durante uma pesquisa longa.
 
-use crate::core::scanner::{self, MemoryScanner, ProcessInfo, ScanResult};
+use crate::core::scanner::{self, MemoryScanner, Num, ProcessInfo, ScanResult};
 use crate::i18n::{self, n_, tr, trf};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
@@ -26,23 +26,27 @@ const UI_SCALE: f32 = (12.5 + FONT_BONUS) / 12.5;
 /// Cor de realce para títulos e cabeçalhos.
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(20, 60, 130);
 
-const SCAN_NAMES: [&str; 6] = [
+const SCAN_NAMES: [&str; 8] = [
     n_("2 and 4 Bytes"),
     n_("1 Byte"),
     n_("2 Bytes"),
     n_("4 Bytes"),
     n_("8 Bytes"),
-    n_("Auto (1, 2, 4 and 8)"),
+    n_("Float 4 bytes"),
+    n_("Double 8 bytes"),
+    n_("Auto (1, 2, 4, Float and Double)"),
 ];
 
 fn scan_widths(idx: usize) -> &'static [usize] {
     match idx {
-        0 => &[2, 4],
-        1 => &[1],
-        2 => &[2],
-        3 => &[4],
-        4 => &[8],
-        _ => &[1, 2, 4, 8],
+        0 => &[2, 4],        // 2 and 4 Bytes (int)
+        1 => &[1],           // 1 Byte
+        2 => &[2],           // 2 Bytes
+        3 => &[4],           // 4 Bytes int
+        4 => &[8],           // 8 Bytes int
+        5 => &[5],           // Float 4 bytes (width tag 5)
+        6 => &[6],           // Double 8 bytes (width tag 6)
+        _ => &[1, 2, 4, 5, 6, 8], // Auto with all types
     }
 }
 
@@ -81,8 +85,19 @@ fn parse_int(raw: &str) -> Option<i64> {
     }
 }
 
+/// Número: inteiro (decimal, 0x, 0b, 0o) ou decimal com ponto ou vírgula (1.5, 1,5, 1e3).
+fn parse_num(raw: &str) -> Option<Num> {
+    if let Some(i) = parse_int(raw) {
+        return Some(Num::Int(i));
+    }
+    let f: f64 = raw.trim().replace(',', ".").parse().ok()?;
+    f.is_finite().then_some(Num::F64(f))
+}
+
 fn kind_name(width: usize) -> String {
     match width {
+        5 => tr("Float 4 bytes"),
+        6 => tr("Double 8 bytes"),
         1 => tr("1 Byte"),
         2 => tr("2 Bytes"),
         4 => tr("4 Bytes"),
@@ -434,11 +449,11 @@ struct Popup {
 struct WriteItem {
     addr: u64,
     width: usize,
-    value: i64,
+    value: Num,
 }
 
 enum Req {
-    Scan { gid: u64, pid: i32, value: i64, widths: Vec<usize>, first: bool },
+    Scan { gid: u64, pid: i32, value: Num, widths: Vec<usize>, first: bool },
     Reset,
     /// Desfaz a última pesquisa (repõe a lista de candidatos anterior).
     Undo { gid: u64, pid: i32 },
@@ -457,7 +472,7 @@ struct ScanOut {
 }
 
 struct SyncOut {
-    reads: Vec<(Key, Option<i64>)>,
+    reads: Vec<(Key, Option<Num>)>,
     write_error: Option<String>,
 }
 
@@ -465,7 +480,7 @@ enum Resp {
     Scan {
         gid: u64,
         pid: i32,
-        value: i64,
+        value: Num,
         first: bool,
         result: Result<ScanOut, String>,
     },
@@ -521,7 +536,7 @@ fn worker_loop(rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context, cancel: 
             }
             Req::Write { gid, rows, pid, items } => {
                 let _ = sc.attach_to_pid(pid);
-                let tuples: Vec<(u64, usize, i64)> =
+                let tuples: Vec<(u64, usize, Num)> =
                     items.iter().map(|w| (w.addr, w.width, w.value)).collect();
                 let results: Vec<Result<(), String>> = match sc.write_values(&tuples) {
                     Ok(v) => v,
@@ -532,7 +547,7 @@ fn worker_loop(rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context, cancel: 
             }
             Req::Sync { gid, pid, writes, reads } => {
                 let _ = sc.attach_to_pid(pid);
-                let wt: Vec<(u64, usize, i64)> = writes.iter().map(|w| (w.addr, w.width, w.value)).collect();
+                let wt: Vec<(u64, usize, Num)> = writes.iter().map(|w| (w.addr, w.width, w.value)).collect();
                 let result = sc.sync(&wt, &reads).map(|(wres, rvals)| SyncOut {
                     write_error: wres.into_iter().find_map(|r| r.err()),
                     reads: reads.iter().copied().zip(rvals).collect(),
@@ -569,7 +584,7 @@ pub struct BSDConquerorApp {
     // estado da pesquisa
     scan_has_results: bool,
     scan_pid: Option<i32>,
-    locked: HashMap<Key, i64>,
+    locked: HashMap<Key, Num>,
     last_sync: Instant,
     sync_now: bool,
     sync_fails: u8,
@@ -823,7 +838,7 @@ impl BSDConquerorApp {
             self.status = tr("Type an integer value to search for.");
             return;
         }
-        let Some(value) = parse_int(&raw) else {
+        let Some(value) = parse_num(&raw) else {
             self.show_alert(
                 tr("BSDConqueror - Invalid input"),
                 tr("Enter a valid integer value to search for!"),
@@ -901,7 +916,7 @@ impl BSDConquerorApp {
         self.editing = None;
     }
 
-    fn finish_scan(&mut self, pid: i32, value: i64, first: bool, result: Result<ScanOut, String>) {
+    fn finish_scan(&mut self, pid: i32, value: Num, first: bool, result: Result<ScanOut, String>) {
         let mode = if first { tr("Search") } else { tr("Next Search") };
         match result {
             Ok(out) => {
@@ -967,7 +982,7 @@ impl BSDConquerorApp {
             self.status = tr("Select a process before editing values.");
             return;
         };
-        let Some(value) = parse_int(&text) else {
+        let Some(value) = parse_num(&text) else {
             self.status = tr("Invalid integer value.");
             return;
         };
@@ -1004,7 +1019,7 @@ impl BSDConquerorApp {
         let total = results.len();
         let mut ok = 0usize;
         let mut first_err: Option<String> = None;
-        let mut last_ok: Option<(Key, i64)> = None;
+        let mut last_ok: Option<(Key, Num)> = None;
         for (it, res) in &results {
             let key: Key = (it.addr, it.width);
             match res {
@@ -1131,13 +1146,13 @@ impl BSDConquerorApp {
     }
 
     /// Atualiza os valores mostrados (listas Found e de baixo) por (endereço, largura).
-    fn apply_reads(&mut self, reads: &[(Key, Option<i64>)]) {
-        let map: HashMap<Key, Option<i64>> = reads.iter().copied().collect();
+    fn apply_reads(&mut self, reads: &[(Key, Option<Num>)]) {
+        let map: HashMap<Key, Option<Num>> = reads.iter().copied().collect();
         let skip = match &self.editing {
             Some(e) if e.col == EditCol::Value => Some(e.row),
             _ => None,
         };
-        let text = |v: Option<i64>| match v {
+        let text = |v: Option<Num>| match v {
             Some(x) => x.to_string(),
             None => "?".to_string(),
         };
@@ -1180,7 +1195,7 @@ impl BSDConquerorApp {
             let row = &mut self.result_rows[*t];
             let key = row.key();
             if lock {
-                match parse_int(row.value.trim()) {
+                match parse_num(row.value.trim()) {
                     Some(v) => {
                         row.locked = true;
                         self.locked.insert(key, v);

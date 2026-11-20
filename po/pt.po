@@ -469,6 +469,15 @@ msgstr "Domínio público (Unlicense): uso livre, sem garantias."
 msgid "Preferences: {}"
 msgstr "Preferências: {}"
 
+msgid "Float 4 bytes"
+msgstr "4 bytes float"
+
+msgid "Double 8 bytes"
+msgstr "8 bytes double"
+
+msgid "Auto (1, 2, 4, Float and Double)"
+msgstr "Auto (1, 2, 4, Float e Double)"
+
 #: src/ui/mod.rs:2009
 msgid "OK"
 msgstr "OK"
