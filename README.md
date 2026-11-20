@@ -22,12 +22,17 @@ online nem em programas de outras pessoas.
 ## Funcionalidades
 
 - Lista de processos com filtro e ordenação por coluna (PID, utilizador, nome).
-- Pesquisa de inteiros de **1, 2, 4 e 8 bytes** (por omissão "2 e 4 Bytes"; há também "Auto").
-- Pesquisa em **todos os endereços**, byte a byte. Encontra valores desalinhados, típicos de
-  jogos DOS dentro de emuladores (DOSBox e semelhantes).
+- Pesquisa de inteiros de **1, 2, 4 e 8 bytes**, **float** (4 bytes) e **double** (8 bytes)
+  (por omissão "2 e 4 Bytes"; há também "Auto").
+- Pesquisa por **valor desconhecido**: o primeiro passo guarda um instantâneo da memória
+  e os seguintes filtram por aumentou, diminuiu, mudou, não mudou ou igual a.
+- Pesquisa em **todos os endereços**, byte a byte, no modo exato. Encontra valores
+  desalinhados, típicos de jogos DOS dentro de emuladores (DOSBox e semelhantes). No modo
+  de valor desconhecido a pesquisa é alinhada ao tamanho do tipo escolhido.
 - Lista **Found** com os primeiros 20 endereços distintos. Se o mesmo endereço aparece com
   várias larguras, mostra só a mais estreita.
 - Valores **atualizados em tempo real** (de 1 em 1 s; de 0,3 em 0,3 s com locks ativos).
+- **Desfazer** a última pesquisa (até 5 listas anteriores).
 - **Lista de baixo** para os endereços de interesse:
   - editar o valor (duplo clique ou `F2`) e a descrição (duplo clique);
   - com várias linhas selecionadas, o valor e o lock aplicam-se a **todas**;
@@ -35,7 +40,7 @@ online nem em programas de outras pessoas.
   - remover linhas (`Delete`), selecionar tudo (`Ctrl+A`), limpar a lista.
 - Zoom da interface com **Ctrl + roda do rato** (também `Ctrl +`, `Ctrl -`, `Ctrl 0`).
 - Preferências guardadas entre execuções: zoom, tamanho da janela, largura das colunas e
-  dos painéis, tamanho de valor escolhido.
+  dos painéis, tipo de pesquisa, idioma e tema.
 
 ## Requisitos
 
@@ -52,8 +57,37 @@ cargo build --release
 ./target/release/bsdconqueror
 ```
 
-Usa sempre `--release`: a pesquisa percorre toda a memória byte a byte e em modo debug
-fica muito mais lenta.
+Ou, usando o `Makefile` (compatível com `bmake`/FreeBSD e GNU make):
+
+```sh
+make
+./target/release/bsdconqueror
+```
+
+Usa sempre `--release` (ou `make`): a pesquisa percorre toda a memória byte a byte e em
+modo debug fica muito mais lenta.
+
+## Instalar (FreeBSD)
+
+Para instalar o binário e a integração de desktop (ícone e ficheiro `.desktop`):
+
+```sh
+make
+make install
+```
+
+Por omissão instala em `/usr/local`. Podes ajustar o prefixo e usar `DESTDIR` para staging:
+
+```sh
+make PREFIX=/usr install
+make DESTDIR=/tmp/pkg PREFIX=/usr/local install
+```
+
+Para desinstalar:
+
+```sh
+make uninstall
+```
 
 ## Permissões
 
@@ -95,11 +129,18 @@ Ficam em `~/.config/bsdconqueror/config.ini` (ou em `$XDG_CONFIG_HOME/bsdconquer
 
 ## Limitações conhecidas
 
-- Só inteiros (sem `float`/`double` por enquanto).
 - Valores de 1 byte entre 128 e 255 aparecem como negativos.
-- Máximo de 16 milhões de endereços candidatos por pesquisa.
+- Máximo de 16 milhões de endereços candidatos por pesquisa exata. O modo de valor
+  desconhecido tem um limite próprio (8 milhões) e guarda também o valor de cada endereço,
+  pelo que usa bastante mais memória.
 - Só percorre regiões de memória com leitura e escrita (sem dispositivos nem guard pages).
-- Não há pesquisa de ponteiros nem de valores desconhecidos.
+- **Sem pesquisa de ponteiros (pointer scan):** O programa não suporta resolução
+  de cadeias de ponteiros multinível. Para o público-alvo principal no FreeBSD —
+  emuladores como o **DOSBox**, ScummVM e jogos retro —, esta funcionalidade não é
+  necessária, pois estes ambientes operam em blocos de memória contíguos e estáticos
+  (sem ASLR nem alocações dinâmicas complexas típicas de motores 3D modernos).
+  A varredura byte-a-byte desalinhada e o modo de valor desconhecido cobrem
+  praticamente todas as necessidades nestes cenários.
 
 ## Estrutura do projeto
 
@@ -119,15 +160,14 @@ A interface não bloqueia: o scanner corre numa thread própria e comunica por c
 
 ## Próximos passos
 
-- Desfazer (rollback) da última pesquisa.
-- Menu (Ficheiro, Ver, Ajuda).
-- Traduções com ficheiros `.po`.
-- Pesquisa de `float` e `double`.
+- Suporte a inteiros sem sinal (unsigned, exibição de `0..255` em 1 byte).
+- Testes de integração com um processo alvo real (o `ptrace` não corre em testes unitários).
 
 ## Histórico
 
 | Versão | Descrição |
 |---|---|
+| 0.30.0 | Float/double, desfazer, traduções e pesquisa por valor desconhecido |
 | 0.20.0 | Scanner nativo (`ptrace`/`procstat`), sem scanmem |
 
 ## Licença

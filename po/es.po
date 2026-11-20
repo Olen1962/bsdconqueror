@@ -28,10 +28,6 @@ msgstr "4 Bytes"
 msgid "8 Bytes"
 msgstr "8 Bytes"
 
-#: src/ui/mod.rs:35
-msgid "Auto (1, 2, 4 and 8)"
-msgstr "Auto (1, 2, 4 y 8)"
-
 #: src/ui/mod.rs:688
 msgid "Select a process, type a value and search (processes of other users require root)."
 msgstr "Selecciona un proceso, escribe un valor y busca (los procesos de otros usuarios requieren root)."
@@ -52,17 +48,9 @@ msgstr "BSDConqueror - Error"
 msgid "Select a process in the list first!"
 msgstr "¡Selecciona primero un proceso de la lista!"
 
-#: src/ui/mod.rs:823
-msgid "Type an integer value to search for."
-msgstr "Escribe un valor entero para buscar."
-
 #: src/ui/mod.rs:828
 msgid "BSDConqueror - Invalid input"
 msgstr "BSDConqueror - Entrada no válida"
-
-#: src/ui/mod.rs:829
-msgid "Enter a valid integer value to search for!"
-msgstr "¡Introduce un valor entero válido para buscar!"
 
 #: src/ui/mod.rs:834 src/ui/mod.rs:905 src/ui/mod.rs:1609 src/ui/mod.rs:1897
 msgid "Search"
@@ -73,15 +61,15 @@ msgid "Next Search"
 msgstr "Siguiente búsqueda"
 
 #: src/ui/mod.rs:838
-msgid "{}: PID {}, value {}... (Auto mode: may take a long time)"
+msgid "{}: PID {}, value {}… (Auto mode: may take a long time)"
 msgstr "{}: PID {}, valor {}... (modo Auto: puede tardar bastante)"
 
 #: src/ui/mod.rs:840
-msgid "{}: PID {}, value {}... (the process is paused during the search)"
+msgid "{}: PID {}, value {}… (the process is paused during the search)"
 msgstr "{}: PID {}, valor {}... (el proceso se pausa durante la búsqueda)"
 
 #: src/ui/mod.rs:858
-msgid "Undoing the last search..."
+msgid "Undoing the last search…"
 msgstr "Deshaciendo la última búsqueda..."
 
 #: src/ui/mod.rs:881
@@ -116,12 +104,8 @@ msgstr "{}: {} direcciones (mostrando {}).{}"
 msgid "Select a process before editing values."
 msgstr "Selecciona un proceso antes de editar valores."
 
-#: src/ui/mod.rs:971
-msgid "Invalid integer value."
-msgstr "Valor entero no válido."
-
 #: src/ui/mod.rs:998
-msgid "Writing {} to {} address(es)..."
+msgid "Writing {} to {} address(es)…"
 msgstr "Escribiendo {} en {} dirección(es)..."
 
 #: src/ui/mod.rs:1031
@@ -149,7 +133,7 @@ msgid "Error accessing the process: {}"
 msgstr "Error al acceder al proceso: {}"
 
 #: src/ui/mod.rs:1087
-msgid "Error accessing the process: {} - updates and locks disabled."
+msgid "Error accessing the process: {} — updates and locks disabled."
 msgstr "Error al acceder al proceso: {} - actualizaciones y bloqueos deshabilitados."
 
 #: src/ui/mod.rs:1188
@@ -257,7 +241,7 @@ msgid "Process selection"
 msgstr "Selección de proceso"
 
 #: src/ui/mod.rs:1452
-msgid "Filter process name, PID or user..."
+msgid "Filter process name, PID or user…"
 msgstr "Filtrar nombre de proceso, PID o usuario..."
 
 #: src/ui/mod.rs:1460
@@ -303,10 +287,6 @@ msgstr "Ningún proceso seleccionado"
 #: src/ui/mod.rs:1597
 msgid "Value:"
 msgstr "Valor:"
-
-#: src/ui/mod.rs:1601
-msgid "Integer value, e.g. 123456"
-msgstr "Valor entero, ej. 123456"
 
 #: src/ui/mod.rs:1615
 msgid "Undo"
@@ -441,5 +421,85 @@ msgid "Preferences: {}"
 msgstr "Preferencias: {}"
 
 #: src/ui/mod.rs:2009
+
+# Float e double
+msgid "Float 4 bytes"
+msgstr "4 bytes float"
+
+msgid "Double 8 bytes"
+msgstr "8 bytes double"
+
+msgid "Auto (1, 2, 4, Float and Double)"
+msgstr "Auto (1, 2, 4, Float e Double)"
 msgid "OK"
 msgstr "Aceptar"
+
+msgid "Unknown value"
+msgstr "Valor desconocido"
+
+msgid "Increased"
+msgstr "Aumentó"
+
+msgid "Decreased"
+msgstr "Disminuyó"
+
+msgid "Changed"
+msgstr "Cambió"
+
+msgid "Unchanged"
+msgstr "Sin cambios"
+
+msgid "Equal to"
+msgstr "Igual a"
+
+msgid "Snapshot: PID {}, type {}… (the process is paused during the scan)"
+msgstr "Instantánea: PID {}, tipo {}… (el proceso se pausa durante la búsqueda)"
+
+msgid "Type a value to search for."
+msgstr "Escriba un valor para buscar."
+
+msgid "Enter a valid value to search for!"
+msgstr "¡Introduce un valor válido para buscar!"
+
+msgid "Invalid value."
+msgstr "Valor no válido."
+
+msgid "Comparison '{}': PID {}, type {}… (the process is paused during the scan)"
+msgstr "Comparación '{}': PID {}, tipo {}… (el proceso se pausa durante la búsqueda)"
+
+msgid "No addresses matched '{}'. Current values (sample): {}."
+msgstr "Ningún enderezo coincide con '{}'. Valores actuales (muestra): {}."
+
+msgid "Snapshot: {} addresses of type {}.{}"
+msgstr "Instantánea: {} direcciones de tipo {}.{}"
+
+msgid "{}: no addresses."
+msgstr "{}: ninguna dirección."
+
+msgid "Value (only used with Equal to)"
+msgstr "Valor (solo se usa con Igual a)"
+
+msgid "Value, e.g. 123456 or 1.5"
+msgstr "Valor, por ejemplo 123456 o 1.5"
+
+msgid "Unknown value type:"
+msgstr "Tipo de valor desconocido:"
+
+msgid "Comparison:"
+msgstr "Comparación:"
+
+#: src/ui/mod.rs
+msgid "Theme"
+msgstr "Tema"
+
+#: src/ui/mod.rs
+msgid "Light"
+msgstr "Claro"
+
+#: src/ui/mod.rs
+msgid "Dark"
+msgstr "Oscuro"
+
+#: src/ui/mod.rs
+msgid "System"
+msgstr "Sistema"

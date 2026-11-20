@@ -26,9 +26,6 @@ msgstr "4 Byte"
 msgid "8 Bytes"
 msgstr "8 Byte"
 
-msgid "Auto (1, 2, 4 and 8)"
-msgstr "Auto (1, 2, 4 und 8)"
-
 msgid "Select a process, type a value and search (processes of other users require root)."
 msgstr "Wählen Sie einen Prozess, geben Sie einen Wert ein und starten Sie die Suche (Prozesse anderer Benutzer erfordern root)."
 
@@ -44,14 +41,8 @@ msgstr "BSDConqueror - Fehler"
 msgid "Select a process in the list first!"
 msgstr "Wählen Sie zuerst einen Prozess in der Liste aus!"
 
-msgid "Type an integer value to search for."
-msgstr "Geben Sie einen ganzzahligen Suchwert ein."
-
 msgid "BSDConqueror - Invalid input"
 msgstr "BSDConqueror - Ungültige Eingabe"
-
-msgid "Enter a valid integer value to search for!"
-msgstr "Geben Sie einen gültigen ganzzahligen Wert für die Suche ein!"
 
 msgid "Search"
 msgstr "Suchen"
@@ -85,9 +76,6 @@ msgstr "Fehler: {}"
 
 msgid "Select a process before editing values."
 msgstr "Wählen Sie einen Prozess, bevor Sie Werte bearbeiten."
-
-msgid "Invalid integer value."
-msgstr "Ungültiger ganzzahliger Wert."
 
 msgid "Writing {} to {} address(es)…"
 msgstr "Schreibe {} an {} Adresse(n)…"
@@ -203,9 +191,6 @@ msgstr "Kein Prozess ausgewählt"
 msgid "Value:"
 msgstr "Wert:"
 
-msgid "Integer value, e.g. 123456"
-msgstr "Ganzzahliger Wert, z. B. 123456"
-
 msgid "Reset"
 msgstr "Zurücksetzen"
 
@@ -293,6 +278,15 @@ msgstr "Gemeinfrei (Unlicense): frei nutzbar, ohne Gewährleistung."
 msgid "Preferences: {}"
 msgstr "Einstellungen: {}"
 
+# Float e double
+msgid "Float 4 bytes"
+msgstr "4 bytes float"
+
+msgid "Double 8 bytes"
+msgstr "8 bytes double"
+
+msgid "Auto (1, 2, 4, Float and Double)"
+msgstr "Auto (1, 2, 4, Float e Double)"
 msgid "OK"
 msgstr "OK"
 
@@ -339,3 +333,73 @@ msgstr "Letzte Suche wird rückgängig gemacht…"
 
 msgid "Undone: {} addresses restored."
 msgstr "Rückgängig gemacht: {} Adressen wiederhergestellt."
+
+msgid "Unknown value"
+msgstr "Unbekannter Wert"
+
+msgid "Increased"
+msgstr "Erhöht"
+
+msgid "Decreased"
+msgstr "Verringert"
+
+msgid "Changed"
+msgstr "Geändert"
+
+msgid "Unchanged"
+msgstr "Unverändert"
+
+msgid "Equal to"
+msgstr "Gleich"
+
+msgid "Snapshot: PID {}, type {}… (the process is paused during the scan)"
+msgstr "Momentaufnahme: PID {}, Typ {}… (der Prozess wird während der Suche angehalten)"
+
+msgid "Type a value to search for."
+msgstr "Gib einen Wert zum Suchen ein."
+
+msgid "Enter a valid value to search for!"
+msgstr "Gib einen gültigen Wert zum Suchen ein!"
+
+msgid "Invalid value."
+msgstr "Ungültiger Wert."
+
+msgid "Comparison '{}': PID {}, type {}… (the process is paused during the scan)"
+msgstr "Vergleich '{}': PID {}, Typ {}… (der Prozess wird während der Suche angehalten)"
+
+msgid "No addresses matched '{}'. Current values (sample): {}."
+msgstr "Keine Adresse entspricht '{}'. Aktuelle Werte (Stichprobe): {}."
+
+msgid "Snapshot: {} addresses of type {}.{}"
+msgstr "Momentaufnahme: {} Adressen vom Typ {}.{}"
+
+msgid "{}: no addresses."
+msgstr "{}: keine Adressen."
+
+msgid "Value (only used with Equal to)"
+msgstr "Wert (nur bei Gleich verwendet)"
+
+msgid "Value, e.g. 123456 or 1.5"
+msgstr "Wert, z. B. 123456 oder 1.5"
+
+msgid "Unknown value type:"
+msgstr "Typ des unbekannten Werts:"
+
+msgid "Comparison:"
+msgstr "Vergleich:"
+
+#: src/ui/mod.rs
+msgid "Theme"
+msgstr "Thema"
+
+#: src/ui/mod.rs
+msgid "Light"
+msgstr "Hell"
+
+#: src/ui/mod.rs
+msgid "Dark"
+msgstr "Dunkel"
+
+#: src/ui/mod.rs
+msgid "System"
+msgstr "System"

@@ -1,0 +1,18 @@
+[Desktop Entry]
+Type=Application
+Name=BSDConqueror
+GenericName=Memory Scanner
+GenericName[pt]=Pesquisador de Memória
+Comment=Memory scanner and editor for FreeBSD processes
+Comment[pt]=Pesquisador e editor de memória de processos para FreeBSD
+Comment[es]=Escáner y editor de memoria para procesos de FreeBSD
+Comment[de]=Speicherscanner und -editor für FreeBSD-Prozesse
+Comment[fr]=Analyseur et éditeur de mémoire pour les processus FreeBSD
+Comment[it]=Scanner ed editor di memoria per processi FreeBSD
+Comment[pl]=Skaner i edytor pamięci procesów FreeBSD
+Exec=bsdconqueror
+Icon=bsdconqueror
+Terminal=false
+Categories=Utility;Development;System;
+Keywords=memory;scanner;debug;ptrace;cheat;hex;
+StartupNotify=false

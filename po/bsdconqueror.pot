@@ -11,459 +11,549 @@ msgid "2 and 4 Bytes"
 msgstr ""
 
 #: src/ui/mod.rs:31
-#: src/ui/mod.rs:86
+#: src/ui/mod.rs:142
 msgid "1 Byte"
 msgstr ""
 
 #: src/ui/mod.rs:32
-#: src/ui/mod.rs:87
+#: src/ui/mod.rs:143
 msgid "2 Bytes"
 msgstr ""
 
 #: src/ui/mod.rs:33
-#: src/ui/mod.rs:88
+#: src/ui/mod.rs:144
 msgid "4 Bytes"
 msgstr ""
 
 #: src/ui/mod.rs:34
-#: src/ui/mod.rs:89
+#: src/ui/mod.rs:145
 msgid "8 Bytes"
 msgstr ""
 
 #: src/ui/mod.rs:35
-msgid "Auto (1, 2, 4 and 8)"
+#: src/ui/mod.rs:140
+msgid "Float 4 bytes"
 msgstr ""
 
-#: src/ui/mod.rs:688
+#: src/ui/mod.rs:36
+#: src/ui/mod.rs:141
+msgid "Double 8 bytes"
+msgstr ""
+
+#: src/ui/mod.rs:37
+msgid "Auto (1, 2, 4, Float and Double)"
+msgstr ""
+
+#: src/ui/mod.rs:38
+msgid "Unknown value"
+msgstr ""
+
+#: src/ui/mod.rs:48
+msgid "Increased"
+msgstr ""
+
+#: src/ui/mod.rs:49
+msgid "Decreased"
+msgstr ""
+
+#: src/ui/mod.rs:50
+msgid "Changed"
+msgstr ""
+
+#: src/ui/mod.rs:51
+msgid "Unchanged"
+msgstr ""
+
+#: src/ui/mod.rs:52
+msgid "Equal to"
+msgstr ""
+
+#: src/ui/mod.rs:835
+#: src/ui/mod.rs:2141
 msgid "Select a process, type a value and search (processes of other users require root)."
 msgstr ""
 
-#: src/ui/mod.rs:790
+#: src/ui/mod.rs:940
 msgid "{} processes listed."
 msgstr ""
 
-#: src/ui/mod.rs:808
+#: src/ui/mod.rs:959
+#: src/ui/mod.rs:2139
 msgid "Process selected: {} (PID {})."
 msgstr ""
 
-#: src/ui/mod.rs:818
+#: src/ui/mod.rs:969
 msgid "BSDConqueror - Error"
 msgstr ""
 
-#: src/ui/mod.rs:818
+#: src/ui/mod.rs:969
 msgid "Select a process in the list first!"
 msgstr ""
 
-#: src/ui/mod.rs:823
-msgid "Type an integer value to search for."
+#: src/ui/mod.rs:980
+msgid "Snapshot: PID {}, type {}… (the process is paused during the scan)"
 msgstr ""
 
-#: src/ui/mod.rs:828
+#: src/ui/mod.rs:991
+#: src/ui/mod.rs:1024
+msgid "Type a value to search for."
+msgstr ""
+
+#: src/ui/mod.rs:994
+#: src/ui/mod.rs:1030
 msgid "BSDConqueror - Invalid input"
 msgstr ""
 
-#: src/ui/mod.rs:829
-msgid "Enter a valid integer value to search for!"
+#: src/ui/mod.rs:995
+#: src/ui/mod.rs:1031
+msgid "Enter a valid value to search for!"
 msgstr ""
 
-#: src/ui/mod.rs:834
-#: src/ui/mod.rs:905
-#: src/ui/mod.rs:1609
-#: src/ui/mod.rs:1897
+#: src/ui/mod.rs:1004
+msgid "Comparison '{}': PID {}, type {}… (the process is paused during the scan)"
+msgstr ""
+
+#: src/ui/mod.rs:1036
+#: src/ui/mod.rs:1151
+#: src/ui/mod.rs:1841
+#: src/ui/mod.rs:2183
 msgid "Search"
 msgstr ""
 
-#: src/ui/mod.rs:834
-#: src/ui/mod.rs:905
-#: src/ui/mod.rs:1609
+#: src/ui/mod.rs:1036
+#: src/ui/mod.rs:1151
+#: src/ui/mod.rs:1841
 msgid "Next Search"
 msgstr ""
 
-#: src/ui/mod.rs:838
+#: src/ui/mod.rs:1039
 msgid "{}: PID {}, value {}… (Auto mode: may take a long time)"
 msgstr ""
 
-#: src/ui/mod.rs:840
+#: src/ui/mod.rs:1041
 msgid "{}: PID {}, value {}… (the process is paused during the search)"
 msgstr ""
 
-#: src/ui/mod.rs:858
+#: src/ui/mod.rs:1062
 msgid "Undoing the last search…"
 msgstr ""
 
-#: src/ui/mod.rs:881
+#: src/ui/mod.rs:1086
 msgid "Undone: {} addresses restored."
 msgstr ""
 
-#: src/ui/mod.rs:885
-#: src/ui/mod.rs:949
+#: src/ui/mod.rs:1090
+#: src/ui/mod.rs:1180
 msgid "BSDConqueror - Execution error"
 msgstr ""
 
-#: src/ui/mod.rs:885
-#: src/ui/mod.rs:949
+#: src/ui/mod.rs:1090
+#: src/ui/mod.rs:1180
 msgid "Error: {}"
 msgstr ""
 
-#: src/ui/mod.rs:913
+#: src/ui/mod.rs:1118
 msgid "None of the {} addresses has the value {}. Current values (sample): {}."
 msgstr ""
 
-#: src/ui/mod.rs:934
+#: src/ui/mod.rs:1122
+msgid "No addresses matched '{}'. Current values (sample): {}."
+msgstr ""
+
+#: src/ui/mod.rs:1145
 msgid "(limit reached: partial results)"
 msgstr ""
 
-#: src/ui/mod.rs:939
+#: src/ui/mod.rs:1153
 msgid "{}: no address with the value {}."
 msgstr ""
 
-#: src/ui/mod.rs:941
+#: src/ui/mod.rs:1155
+#: src/ui/mod.rs:1170
 msgid "{}: {} addresses (showing {}).{}"
 msgstr ""
 
-#: src/ui/mod.rs:967
+#: src/ui/mod.rs:1161
+#: src/ui/mod.rs:2134
+msgid "Snapshot: {} addresses of type {}.{}"
+msgstr ""
+
+#: src/ui/mod.rs:1168
+msgid "{}: no addresses."
+msgstr ""
+
+#: src/ui/mod.rs:1198
 msgid "Select a process before editing values."
 msgstr ""
 
-#: src/ui/mod.rs:971
-msgid "Invalid integer value."
+#: src/ui/mod.rs:1202
+msgid "Invalid value."
 msgstr ""
 
-#: src/ui/mod.rs:998
+#: src/ui/mod.rs:1229
 msgid "Writing {} to {} address(es)…"
 msgstr ""
 
-#: src/ui/mod.rs:1031
+#: src/ui/mod.rs:1262
 msgid "BSDConqueror - Write error"
 msgstr ""
 
-#: src/ui/mod.rs:1032
+#: src/ui/mod.rs:1263
 msgid "{} of {} writes failed.\n\n{}"
 msgstr ""
 
-#: src/ui/mod.rs:1039
+#: src/ui/mod.rs:1270
 msgid "Value at {} changed to {}."
 msgstr ""
 
-#: src/ui/mod.rs:1041
+#: src/ui/mod.rs:1272
 msgid "Value {} written to {} address(es)."
 msgstr ""
 
-#: src/ui/mod.rs:1079
+#: src/ui/mod.rs:1310
 msgid "Error locking value: {}"
 msgstr ""
 
-#: src/ui/mod.rs:1084
+#: src/ui/mod.rs:1315
 msgid "Error accessing the process: {}"
 msgstr ""
 
-#: src/ui/mod.rs:1087
+#: src/ui/mod.rs:1318
 msgid "Error accessing the process: {} — updates and locks disabled."
 msgstr ""
 
-#: src/ui/mod.rs:1188
+#: src/ui/mod.rs:1419
 msgid "Lock on: {} = {}"
 msgstr ""
 
-#: src/ui/mod.rs:1192
+#: src/ui/mod.rs:1423
 msgid "Cannot lock the value '{}'."
 msgstr ""
 
-#: src/ui/mod.rs:1200
+#: src/ui/mod.rs:1431
 msgid "Lock off: {}"
 msgstr ""
 
-#: src/ui/mod.rs:1209
+#: src/ui/mod.rs:1440
 msgid "{} without a valid value"
 msgstr ""
 
-#: src/ui/mod.rs:1213
+#: src/ui/mod.rs:1444
 msgid "Lock on for {} address(es){}."
 msgstr ""
 
-#: src/ui/mod.rs:1215
+#: src/ui/mod.rs:1446
 msgid "Lock off for {} address(es)."
 msgstr ""
 
-#: src/ui/mod.rs:1225
+#: src/ui/mod.rs:1456
 msgid "All locks were turned off."
 msgstr ""
 
-#: src/ui/mod.rs:1242
+#: src/ui/mod.rs:1474
 msgid "Search reset."
 msgstr ""
 
-#: src/ui/mod.rs:1248
+#: src/ui/mod.rs:1480
 msgid "Lower list cleared."
 msgstr ""
 
-#: src/ui/mod.rs:1283
+#: src/ui/mod.rs:1510
 msgid "No description"
 msgstr ""
 
-#: src/ui/mod.rs:1289
+#: src/ui/mod.rs:1516
 msgid "{} address(es) added; {} were already in the list."
 msgstr ""
 
-#: src/ui/mod.rs:1291
+#: src/ui/mod.rs:1518
 msgid "{} address(es) added to the lower list."
 msgstr ""
 
-#: src/ui/mod.rs:1299
+#: src/ui/mod.rs:1526
 msgid "Select rows in the Found list first (Ctrl/Shift for several)."
 msgstr ""
 
-#: src/ui/mod.rs:1314
+#: src/ui/mod.rs:1541
 msgid "Select rows in the lower list to remove them."
 msgstr ""
 
-#: src/ui/mod.rs:1333
+#: src/ui/mod.rs:1560
 msgid "{} row(s) removed from the list."
 msgstr ""
 
-#: src/ui/mod.rs:1355
+#: src/ui/mod.rs:1582
 msgid "Select a row to edit its value."
 msgstr ""
 
-#: src/ui/mod.rs:1364
+#: src/ui/mod.rs:1591
+#: src/ui/mod.rs:2132
 msgid "Found: {}"
 msgstr ""
 
-#: src/ui/mod.rs:1367
+#: src/ui/mod.rs:1594
 msgid "Add Selected"
 msgstr ""
 
-#: src/ui/mod.rs:1381
-#: src/ui/mod.rs:1690
+#: src/ui/mod.rs:1608
+#: src/ui/mod.rs:1955
 msgid "Address"
 msgstr ""
 
-#: src/ui/mod.rs:1381
-#: src/ui/mod.rs:1690
+#: src/ui/mod.rs:1608
+#: src/ui/mod.rs:1955
 msgid "Type"
 msgstr ""
 
-#: src/ui/mod.rs:1381
-#: src/ui/mod.rs:1690
+#: src/ui/mod.rs:1608
+#: src/ui/mod.rs:1955
 msgid "Value"
 msgstr ""
 
-#: src/ui/mod.rs:1404
+#: src/ui/mod.rs:1631
 msgid "Add to list"
 msgstr ""
 
-#: src/ui/mod.rs:1409
-#: src/ui/mod.rs:1756
+#: src/ui/mod.rs:1636
+#: src/ui/mod.rs:2021
 msgid "Copy address"
 msgstr ""
 
-#: src/ui/mod.rs:1413
-#: src/ui/mod.rs:1760
+#: src/ui/mod.rs:1640
+#: src/ui/mod.rs:2025
 msgid "Copy value"
 msgstr ""
 
-#: src/ui/mod.rs:1418
-#: src/ui/mod.rs:1653
-#: src/ui/mod.rs:1769
-#: src/ui/mod.rs:1820
-#: src/ui/mod.rs:1915
+#: src/ui/mod.rs:1645
+#: src/ui/mod.rs:1918
+#: src/ui/mod.rs:2034
+#: src/ui/mod.rs:2085
+#: src/ui/mod.rs:2201
 msgid "Select all"
 msgstr ""
 
-#: src/ui/mod.rs:1447
+#: src/ui/mod.rs:1674
 msgid "Process selection"
 msgstr ""
 
-#: src/ui/mod.rs:1452
+#: src/ui/mod.rs:1679
 msgid "Filter process name, PID or user…"
 msgstr ""
 
-#: src/ui/mod.rs:1460
+#: src/ui/mod.rs:1687
 msgid "Refresh"
 msgstr ""
 
-#: src/ui/mod.rs:1477
+#: src/ui/mod.rs:1704
 msgid "PID"
 msgstr ""
 
-#: src/ui/mod.rs:1477
+#: src/ui/mod.rs:1704
 msgid "User"
 msgstr ""
 
-#: src/ui/mod.rs:1477
+#: src/ui/mod.rs:1704
 msgid "Process"
 msgstr ""
 
-#: src/ui/mod.rs:1541
+#: src/ui/mod.rs:1768
 msgid "Select this process"
 msgstr ""
 
-#: src/ui/mod.rs:1546
+#: src/ui/mod.rs:1773
 msgid "Copy PID"
 msgstr ""
 
-#: src/ui/mod.rs:1550
+#: src/ui/mod.rs:1777
 msgid "Copy name"
 msgstr ""
 
-#: src/ui/mod.rs:1556
-#: src/ui/mod.rs:1885
+#: src/ui/mod.rs:1783
+#: src/ui/mod.rs:2171
 msgid "Refresh processes"
 msgstr ""
 
-#: src/ui/mod.rs:1587
+#: src/ui/mod.rs:1814
 msgid "Selected: {}  |  PID: {}  |  User: {}"
 msgstr ""
 
-#: src/ui/mod.rs:1590
+#: src/ui/mod.rs:1817
 msgid "No process selected"
 msgstr ""
 
-#: src/ui/mod.rs:1597
+#: src/ui/mod.rs:1824
 msgid "Value:"
 msgstr ""
 
-#: src/ui/mod.rs:1601
-msgid "Integer value, e.g. 123456"
+#: src/ui/mod.rs:1827
+msgid "Value (only used with Equal to)"
 msgstr ""
 
-#: src/ui/mod.rs:1615
+#: src/ui/mod.rs:1829
+msgid "Value, e.g. 123456 or 1.5"
+msgstr ""
+
+#: src/ui/mod.rs:1847
 msgid "Undo"
 msgstr ""
 
-#: src/ui/mod.rs:1618
-#: src/ui/mod.rs:1901
+#: src/ui/mod.rs:1850
+#: src/ui/mod.rs:2187
 msgid "Undo last search"
 msgstr ""
 
-#: src/ui/mod.rs:1624
+#: src/ui/mod.rs:1856
 msgid "Reset"
 msgstr ""
 
-#: src/ui/mod.rs:1633
+#: src/ui/mod.rs:1865
 msgid "Data type:"
 msgstr ""
 
-#: src/ui/mod.rs:1643
-msgid "Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value."
+#: src/ui/mod.rs:1882
+msgid "Unknown value type:"
 msgstr ""
 
-#: src/ui/mod.rs:1657
-msgid "Clear results"
-msgstr ""
-
-#: src/ui/mod.rs:1661
-#: src/ui/mod.rs:1765
-msgid "Remove"
-msgstr ""
-
-#: src/ui/mod.rs:1664
-msgid "Remove the selected rows (Delete key)"
-msgstr ""
-
-#: src/ui/mod.rs:1669
-#: src/ui/mod.rs:1892
-msgid "Quit"
-msgstr ""
-
-#: src/ui/mod.rs:1690
-msgid "Lock"
-msgstr ""
-
-#: src/ui/mod.rs:1690
-msgid "Description"
-msgstr ""
-
-#: src/ui/mod.rs:1706
-msgid "Select rows in the Found list and use \"Add Selected\" (or double-click a row) to bring them here."
-msgstr ""
-
-#: src/ui/mod.rs:1741
-msgid "Edit value"
-msgstr ""
-
-#: src/ui/mod.rs:1745
-msgid "Edit description"
-msgstr ""
-
-#: src/ui/mod.rs:1750
-msgid "Unlock value"
-msgstr ""
-
-#: src/ui/mod.rs:1750
-msgid "Lock value"
-msgstr ""
-
-#: src/ui/mod.rs:1824
-#: src/ui/mod.rs:1929
-msgid "Clear list"
-msgstr ""
-
-#: src/ui/mod.rs:1883
-msgid "File"
+#: src/ui/mod.rs:1897
+msgid "Comparison:"
 msgstr ""
 
 #: src/ui/mod.rs:1908
-msgid "Reset search"
-msgstr ""
-
-#: src/ui/mod.rs:1913
-msgid "List"
+msgid "Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value."
 msgstr ""
 
 #: src/ui/mod.rs:1922
-msgid "Remove selected"
+msgid "Clear results"
+msgstr ""
+
+#: src/ui/mod.rs:1926
+#: src/ui/mod.rs:2030
+msgid "Remove"
+msgstr ""
+
+#: src/ui/mod.rs:1929
+msgid "Remove the selected rows (Delete key)"
 msgstr ""
 
 #: src/ui/mod.rs:1934
-msgid "View"
-msgstr ""
-
-#: src/ui/mod.rs:1935
-msgid "Zoom in"
-msgstr ""
-
-#: src/ui/mod.rs:1938
-msgid "Zoom out"
-msgstr ""
-
-#: src/ui/mod.rs:1941
-msgid "Reset zoom"
-msgstr ""
-
-#: src/ui/mod.rs:1946
-msgid "Language"
-msgstr ""
-
-#: src/ui/mod.rs:1954
-msgid "Help"
+#: src/ui/mod.rs:2178
+msgid "Quit"
 msgstr ""
 
 #: src/ui/mod.rs:1955
-#: src/ui/mod.rs:1985
+msgid "Lock"
+msgstr ""
+
+#: src/ui/mod.rs:1955
+msgid "Description"
+msgstr ""
+
+#: src/ui/mod.rs:1971
+msgid "Select rows in the Found list and use \"Add Selected\" (or double-click a row) to bring them here."
+msgstr ""
+
+#: src/ui/mod.rs:2006
+msgid "Edit value"
+msgstr ""
+
+#: src/ui/mod.rs:2010
+msgid "Edit description"
+msgstr ""
+
+#: src/ui/mod.rs:2015
+msgid "Unlock value"
+msgstr ""
+
+#: src/ui/mod.rs:2015
+msgid "Lock value"
+msgstr ""
+
+#: src/ui/mod.rs:2089
+#: src/ui/mod.rs:2215
+msgid "Clear list"
+msgstr ""
+
+#: src/ui/mod.rs:2169
+msgid "File"
+msgstr ""
+
+#: src/ui/mod.rs:2194
+msgid "Reset search"
+msgstr ""
+
+#: src/ui/mod.rs:2199
+msgid "List"
+msgstr ""
+
+#: src/ui/mod.rs:2208
+msgid "Remove selected"
+msgstr ""
+
+#: src/ui/mod.rs:2220
+msgid "View"
+msgstr ""
+
+#: src/ui/mod.rs:2221
+msgid "Zoom in"
+msgstr ""
+
+#: src/ui/mod.rs:2224
+msgid "Zoom out"
+msgstr ""
+
+#: src/ui/mod.rs:2227
+msgid "Reset zoom"
+msgstr ""
+
+#: src/ui/mod.rs:2232
+msgid "Theme"
+msgstr ""
+
+#: src/ui/mod.rs:2235
+msgid "Light"
+msgstr ""
+
+#: src/ui/mod.rs:2236
+msgid "Dark"
+msgstr ""
+
+#: src/ui/mod.rs:2237
+msgid "System"
+msgstr ""
+
+#: src/ui/mod.rs:2246
+msgid "Language"
+msgstr ""
+
+#: src/ui/mod.rs:2254
+msgid "Help"
+msgstr ""
+
+#: src/ui/mod.rs:2255
+#: src/ui/mod.rs:2285
 msgid "About BSDConqueror"
 msgstr ""
 
-#: src/ui/mod.rs:1976
+#: src/ui/mod.rs:2276
 msgid "(unavailable)"
 msgstr ""
 
-#: src/ui/mod.rs:1980
+#: src/ui/mod.rs:2280
 msgid "Memory scanner and editor for FreeBSD."
 msgstr ""
 
-#: src/ui/mod.rs:1981
+#: src/ui/mod.rs:2281
 msgid "Uses only native system tools: ptrace, procstat and ps."
 msgstr ""
 
-#: src/ui/mod.rs:1982
+#: src/ui/mod.rs:2282
 msgid "Public domain (Unlicense): free to use, no warranty."
 msgstr ""
 
-#: src/ui/mod.rs:1983
+#: src/ui/mod.rs:2283
 msgid "Preferences: {}"
 msgstr ""
 
-#: src/ui/mod.rs:2009
+#: src/ui/mod.rs:2320
 msgid "OK"
 msgstr ""

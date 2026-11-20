@@ -50,7 +50,12 @@ struct State {
 /// O idioma atual é global, para qualquer parte do programa poder chamar `tr()`.
 fn state() -> &'static RwLock<State> {
     static S: OnceLock<RwLock<State>> = OnceLock::new();
-    S.get_or_init(|| RwLock::new(State { lang: "en".to_string(), table: HashMap::new() }))
+    S.get_or_init(|| {
+        RwLock::new(State {
+            lang: "en".to_string(),
+            table: HashMap::new(),
+        })
+    })
 }
 
 /// Muda o idioma ("en" ou "pt"). Qualquer outro código fica em inglês.
@@ -67,7 +72,10 @@ pub fn set_language(code: &str) {
 
 /// Código do idioma atual.
 pub fn language() -> String {
-    state().read().map(|s| s.lang.clone()).unwrap_or_else(|_| "en".to_string())
+    state()
+        .read()
+        .map(|s| s.lang.clone())
+        .unwrap_or_else(|_| "en".to_string())
 }
 
 /// Idioma do sistema, pelas variáveis LC_ALL, LC_MESSAGES e LANG
@@ -96,10 +104,10 @@ pub const fn n_(s: &'static str) -> &'static str {
 
 /// Traduz uma frase. Sem tradução, devolve a própria frase.
 pub fn tr(msgid: &str) -> String {
-    if let Ok(s) = state().read() {
-        if let Some(t) = s.table.get(msgid) {
-            return t.clone();
-        }
+    if let Ok(s) = state().read()
+        && let Some(t) = s.table.get(msgid)
+    {
+        return t.clone();
     }
     msgid.to_string()
 }
@@ -110,10 +118,10 @@ pub fn trf(msgid: &str, args: &[&dyn Display]) -> String {
     let mut out = String::with_capacity(text.len() + 16);
     let mut next = args.iter();
     for (i, part) in text.split("{}").enumerate() {
-        if i > 0 {
-            if let Some(a) = next.next() {
-                out.push_str(&a.to_string());
-            }
+        if i > 0
+            && let Some(a) = next.next()
+        {
+            out.push_str(&a.to_string());
         }
         out.push_str(part);
     }
@@ -210,7 +218,10 @@ mod tests {
                   msgid \"Hello\\nWorld\"\nmsgstr \"\"\n\"Olá\\n\"\n\"Mundo\"\n";
         let t = parse_po(po);
         assert_eq!(t.get("Quit").map(String::as_str), Some("Sair"));
-        assert_eq!(t.get("Hello\nWorld").map(String::as_str), Some("Olá\nMundo"));
+        assert_eq!(
+            t.get("Hello\nWorld").map(String::as_str),
+            Some("Olá\nMundo")
+        );
         assert!(!t.contains_key("")); // o cabeçalho não é uma frase
     }
 

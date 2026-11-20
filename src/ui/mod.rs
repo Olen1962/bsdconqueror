@@ -8,14 +8,14 @@
 //! A interface só envia pedidos (`Req`) e recebe respostas (`Resp`) por canais,
 //! por isso a janela nunca bloqueia durante uma pesquisa longa.
 
-use crate::core::scanner::{self, MemoryScanner, Num, ProcessInfo, ScanResult};
+use crate::core::scanner::{self, Comparison, MemoryScanner, Num, ProcessInfo, ScanResult};
 use crate::i18n::{self, n_, tr, trf};
 use eframe::egui;
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::mpsc::{self, Receiver, Sender};
-use std::sync::Arc;
 use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
@@ -26,7 +26,7 @@ const UI_SCALE: f32 = (12.5 + FONT_BONUS) / 12.5;
 /// Cor de realce para títulos e cabeçalhos.
 const ACCENT: egui::Color32 = egui::Color32::from_rgb(20, 60, 130);
 
-const SCAN_NAMES: [&str; 8] = [
+const SCAN_NAMES: [&str; 9] = [
     n_("2 and 4 Bytes"),
     n_("1 Byte"),
     n_("2 Bytes"),
@@ -35,25 +35,66 @@ const SCAN_NAMES: [&str; 8] = [
     n_("Float 4 bytes"),
     n_("Double 8 bytes"),
     n_("Auto (1, 2, 4, Float and Double)"),
+    n_("Unknown value"),
 ];
+
+const KIND_AUTO: usize = 7;
+const KIND_UNKNOWN: usize = 8;
+
+/// Tipos disponíveis no modo de valor desconhecido (um só tipo por pesquisa).
+const UNKNOWN_WIDTHS: [usize; 6] = [1, 2, 4, 8, 5, 6];
+
+const COMPARISONS: [(Comparison, &str); 5] = [
+    (Comparison::Increased, n_("Increased")),
+    (Comparison::Decreased, n_("Decreased")),
+    (Comparison::Changed, n_("Changed")),
+    (Comparison::Unchanged, n_("Unchanged")),
+    (Comparison::Equal, n_("Equal to")),
+];
+
+fn comparison_name(c: Comparison) -> &'static str {
+    COMPARISONS
+        .iter()
+        .find(|(v, _)| *v == c)
+        .map(|(_, name)| *name)
+        .unwrap_or("Changed")
+}
+
+fn comparison_code(c: Comparison) -> &'static str {
+    match c {
+        Comparison::Increased => "increased",
+        Comparison::Decreased => "decreased",
+        Comparison::Changed => "changed",
+        Comparison::Unchanged => "unchanged",
+        Comparison::Equal => "equal",
+    }
+}
+
+fn parse_comparison(raw: &str) -> Option<Comparison> {
+    COMPARISONS
+        .iter()
+        .find(|(c, _)| comparison_code(*c).eq_ignore_ascii_case(raw))
+        .map(|(c, _)| *c)
+}
 
 fn scan_widths(idx: usize) -> &'static [usize] {
     match idx {
-        0 => &[2, 4],        // 2 and 4 Bytes (int)
-        1 => &[1],           // 1 Byte
-        2 => &[2],           // 2 Bytes
-        3 => &[4],           // 4 Bytes int
-        4 => &[8],           // 8 Bytes int
-        5 => &[5],           // Float 4 bytes (width tag 5)
-        6 => &[6],           // Double 8 bytes (width tag 6)
-        _ => &[1, 2, 4, 5, 6, 8], // Auto with all types
+        0 => &[2, 4],             // 2 and 4 Bytes (int)
+        1 => &[1],                // 1 Byte
+        2 => &[2],                // 2 Bytes
+        3 => &[4],                // 4 Bytes int
+        4 => &[8],                // 8 Bytes int
+        5 => &[5],                // Float 4 bytes (width tag 5)
+        6 => &[6],                // Double 8 bytes (width tag 6)
+        7 => &[1, 2, 4, 5, 6, 8], // Auto with all types
+        _ => &[1, 2, 4, 5, 6, 8], // Unknown value usa unknown_width, não esta lista
     }
 }
 
 // ───────────────────────────── Utilitários ─────────────────────────────
 
 fn digits(s: &str, radix: u32) -> Option<i64> {
-    if s.is_empty() || s.starts_with(|c: char| c == '+' || c == '-') {
+    if s.is_empty() || s.starts_with(['+', '-']) {
         return None;
     }
     i64::from_str_radix(s, radix).ok()
@@ -110,6 +151,32 @@ fn kind_name(width: usize) -> String {
 // Ficheiro simples chave=valor em $XDG_CONFIG_HOME/bsdconqueror/config.ini
 // (ou ~/.config/bsdconqueror/config.ini).
 
+fn normalize_theme(s: &str) -> String {
+    match s.trim().to_ascii_lowercase().as_str() {
+        "dark" => "dark".to_string(),
+        "system" => "system".to_string(),
+        _ => "light".to_string(),
+    }
+}
+
+fn system_prefers_dark() -> bool {
+    std::env::var("GTK_THEME")
+        .map(|v| v.to_ascii_lowercase().contains("dark"))
+        .unwrap_or(false)
+}
+
+fn theme_visuals(pref: &str) -> egui::Visuals {
+    match normalize_theme(pref).as_str() {
+        "dark" => egui::Visuals::dark(),
+        "system" if system_prefers_dark() => egui::Visuals::dark(),
+        _ => egui::Visuals::light(),
+    }
+}
+
+fn apply_theme_pref(ctx: &egui::Context, pref: &str) {
+    ctx.set_visuals(theme_visuals(pref));
+}
+
 #[derive(Clone, Debug)]
 struct Prefs {
     zoom: f32,
@@ -121,7 +188,10 @@ struct Prefs {
     left_w: f32,
     top_h: f32,
     scan_kind: usize,
+    unknown_width: usize,
+    search_mode: Comparison,
     lang: String,
+    theme: String,
 }
 
 impl Default for Prefs {
@@ -135,7 +205,10 @@ impl Default for Prefs {
             left_w: 340.0,
             top_h: 370.0,
             scan_kind: 0,
+            unknown_width: 4,
+            search_mode: Comparison::Changed,
             lang: i18n::system_language(),
+            theme: "light".to_string(),
         }
     }
 }
@@ -152,9 +225,13 @@ impl Prefs {
     fn load() -> Self {
         let mut p = Self::default();
         let Some(path) = Self::path() else { return p };
-        let Ok(text) = std::fs::read_to_string(path) else { return p };
+        let Ok(text) = std::fs::read_to_string(path) else {
+            return p;
+        };
         for line in text.lines() {
-            let Some((k, v)) = line.split_once('=') else { continue };
+            let Some((k, v)) = line.split_once('=') else {
+                continue;
+            };
             let (k, v) = (k.trim(), v.trim());
             let nums: Vec<f32> = v.split(',').filter_map(|x| x.trim().parse().ok()).collect();
             match k {
@@ -163,18 +240,18 @@ impl Prefs {
                     p.win = Some((nums[0].clamp(500.0, 8000.0), nums[1].clamp(350.0, 8000.0)))
                 }
                 "col_results" if nums.len() == 4 => {
-                    for i in 0..4 {
-                        p.col_results[i] = nums[i].clamp(30.0, 1200.0);
+                    for (dst, n) in p.col_results.iter_mut().zip(nums.iter().take(4)) {
+                        *dst = n.clamp(30.0, 1200.0);
                     }
                 }
                 "col_found" if nums.len() == 2 => {
-                    for i in 0..2 {
-                        p.col_found[i] = nums[i].clamp(30.0, 1200.0);
+                    for (dst, n) in p.col_found.iter_mut().zip(nums.iter().take(2)) {
+                        *dst = n.clamp(30.0, 1200.0);
                     }
                 }
                 "col_proc" if nums.len() == 2 => {
-                    for i in 0..2 {
-                        p.col_proc[i] = nums[i].clamp(30.0, 1200.0);
+                    for (dst, n) in p.col_proc.iter_mut().zip(nums.iter().take(2)) {
+                        *dst = n.clamp(30.0, 1200.0);
                     }
                 }
                 "left_w" if nums.len() == 1 => p.left_w = nums[0].clamp(150.0, 2000.0),
@@ -184,10 +261,24 @@ impl Prefs {
                         p.lang = v.to_string();
                     }
                 }
+                "theme" => {
+                    p.theme = normalize_theme(v);
+                }
                 "scan_kind" if nums.len() == 1 => {
                     let i = nums[0] as usize;
                     if i < SCAN_NAMES.len() {
                         p.scan_kind = i;
+                    }
+                }
+                "unknown_width" if nums.len() == 1 => {
+                    let w = nums[0] as usize;
+                    if UNKNOWN_WIDTHS.contains(&w) {
+                        p.unknown_width = w;
+                    }
+                }
+                "search_mode" => {
+                    if let Some(c) = parse_comparison(v) {
+                        p.search_mode = c;
                     }
                 }
                 _ => {}
@@ -207,12 +298,24 @@ impl Prefs {
             "col_results={:.0},{:.0},{:.0},{:.0}\n",
             self.col_results[0], self.col_results[1], self.col_results[2], self.col_results[3]
         ));
-        t.push_str(&format!("col_found={:.0},{:.0}\n", self.col_found[0], self.col_found[1]));
-        t.push_str(&format!("col_proc={:.0},{:.0}\n", self.col_proc[0], self.col_proc[1]));
+        t.push_str(&format!(
+            "col_found={:.0},{:.0}\n",
+            self.col_found[0], self.col_found[1]
+        ));
+        t.push_str(&format!(
+            "col_proc={:.0},{:.0}\n",
+            self.col_proc[0], self.col_proc[1]
+        ));
         t.push_str(&format!("left_w={:.0}\n", self.left_w));
         t.push_str(&format!("top_h={:.0}\n", self.top_h));
         t.push_str(&format!("scan_kind={}\n", self.scan_kind));
+        t.push_str(&format!("unknown_width={}\n", self.unknown_width));
+        t.push_str(&format!(
+            "search_mode={}\n",
+            comparison_code(self.search_mode)
+        ));
         t.push_str(&format!("lang={}\n", self.lang));
+        t.push_str(&format!("theme={}\n", normalize_theme(&self.theme)));
         t
     }
 
@@ -233,9 +336,11 @@ impl Prefs {
 fn title(ui: &mut egui::Ui, text: &str) {
     let font = egui::TextStyle::Body.resolve(ui.style());
     let galley = ui.painter().layout_no_wrap(text.to_owned(), font, ACCENT);
-    let (rect, _) = ui.allocate_exact_size(galley.size() + egui::vec2(0.7, 0.0), egui::Sense::hover());
+    let (rect, _) =
+        ui.allocate_exact_size(galley.size() + egui::vec2(0.7, 0.0), egui::Sense::hover());
     ui.painter().galley(rect.min, galley.clone(), ACCENT);
-    ui.painter().galley(rect.min + egui::vec2(0.7, 0.0), galley, ACCENT);
+    ui.painter()
+        .galley(rect.min + egui::vec2(0.7, 0.0), galley, ACCENT);
 }
 
 #[derive(Clone, Copy)]
@@ -290,8 +395,15 @@ fn draw_row(
     let mut rects = Vec::with_capacity(widths.len());
     let mut x = rect.left();
     for (i, w) in widths.iter().enumerate() {
-        let cw = if i + 1 == widths.len() { (rect.right() - x).max(60.0) } else { *w };
-        rects.push(egui::Rect::from_min_size(egui::pos2(x, rect.top()), egui::vec2(cw, row_h)));
+        let cw = if i + 1 == widths.len() {
+            (rect.right() - x).max(60.0)
+        } else {
+            *w
+        };
+        rects.push(egui::Rect::from_min_size(
+            egui::pos2(x, rect.top()),
+            egui::vec2(cw, row_h),
+        ));
         x += cw;
     }
     if ui.is_rect_visible(rect) {
@@ -324,7 +436,13 @@ fn draw_row(
             let pos = cr.left_center() + egui::vec2(8.0, 0.0);
             clip.text(pos, egui::Align2::LEFT_CENTER, text, font.clone(), color);
             if header {
-                clip.text(pos + egui::vec2(0.7, 0.0), egui::Align2::LEFT_CENTER, text, font, color);
+                clip.text(
+                    pos + egui::vec2(0.7, 0.0),
+                    egui::Align2::LEFT_CENTER,
+                    text,
+                    font,
+                    color,
+                );
             }
         }
     }
@@ -358,17 +476,21 @@ fn col_handles(ui: &mut egui::Ui, rects: &[egui::Rect], widths: &mut [f32], k: f
 }
 
 /// Lógica de seleção (clique, Ctrl, Shift) partilhada pelas duas listas.
-fn apply_click(sel: &mut HashSet<usize>, anchor: &mut Option<usize>, i: usize, ctrl: bool, shift: bool) {
-    if shift {
-        if let Some(a) = *anchor {
-            if !ctrl {
-                sel.clear();
-            }
-            for k in a.min(i)..=a.max(i) {
-                sel.insert(k);
-            }
-            return;
+fn apply_click(
+    sel: &mut HashSet<usize>,
+    anchor: &mut Option<usize>,
+    i: usize,
+    ctrl: bool,
+    shift: bool,
+) {
+    if shift && let Some(a) = *anchor {
+        if !ctrl {
+            sel.clear();
         }
+        for k in a.min(i)..=a.max(i) {
+            sel.insert(k);
+        }
+        return;
     }
     if ctrl {
         if !sel.remove(&i) {
@@ -452,15 +574,48 @@ struct WriteItem {
     value: Num,
 }
 
+enum ScanMode {
+    Exact {
+        value: Num,
+        widths: Vec<usize>,
+        first: bool,
+    },
+    UnknownFirst {
+        width: usize,
+    },
+    UnknownNext {
+        width: usize,
+        comparison: Comparison,
+        value: Option<Num>,
+    },
+}
+
 enum Req {
-    Scan { gid: u64, pid: i32, value: Num, widths: Vec<usize>, first: bool },
+    Scan {
+        gid: u64,
+        pid: i32,
+        mode: ScanMode,
+    },
     Reset,
     /// Desfaz a última pesquisa (repõe a lista de candidatos anterior).
-    Undo { gid: u64, pid: i32 },
+    Undo {
+        gid: u64,
+        pid: i32,
+    },
     /// `rows`: linhas afetadas e se estavam com lock (para atualizar o lock).
-    Write { gid: u64, rows: Vec<(Key, bool)>, pid: i32, items: Vec<WriteItem> },
+    Write {
+        gid: u64,
+        rows: Vec<(Key, bool)>,
+        pid: i32,
+        items: Vec<WriteItem>,
+    },
     /// Locks (escritas) + leitura de valores atuais, com um único attach.
-    Sync { gid: u64, pid: i32, writes: Vec<WriteItem>, reads: Vec<Key> },
+    Sync {
+        gid: u64,
+        pid: i32,
+        writes: Vec<WriteItem>,
+        reads: Vec<Key>,
+    },
     Shutdown,
 }
 
@@ -469,6 +624,8 @@ struct ScanOut {
     prev_count: usize,
     /// Quantas pesquisas se podem desfazer depois desta operação.
     history: usize,
+    /// Há valores guardados para continuar uma pesquisa de valor desconhecido?
+    has_values: bool,
 }
 
 struct SyncOut {
@@ -480,8 +637,7 @@ enum Resp {
     Scan {
         gid: u64,
         pid: i32,
-        value: Num,
-        first: bool,
+        mode: ScanMode,
         result: Result<ScanOut, String>,
     },
     Write {
@@ -506,23 +662,58 @@ fn worker_loop(rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context, cancel: 
         match req {
             Req::Shutdown => break,
             Req::Reset => sc.reset_scan(),
-            Req::Scan { gid, pid, value, widths, first } => {
+            Req::Scan { gid, pid, mode } => {
                 let _ = sc.attach_to_pid(pid);
-                let result = if first {
-                    sc.perform_first_scan(value, &widths)
-                } else {
-                    sc.perform_next_scan(value, &widths)
+                let result = match &mode {
+                    ScanMode::Exact {
+                        value,
+                        widths,
+                        first,
+                    } => {
+                        if *first {
+                            sc.perform_first_scan(*value, widths)
+                        } else {
+                            sc.perform_next_scan(*value, widths)
+                        }
+                    }
+                    ScanMode::UnknownFirst { width } => sc.perform_unknown_first_scan(*width),
+                    ScanMode::UnknownNext {
+                        width,
+                        comparison,
+                        value,
+                    } => sc.perform_unknown_next_scan(*width, *comparison, *value),
                 };
                 let prev_count = sc.candidate_count();
                 let history = sc.history_len();
-                let result = result.map(|r| ScanOut { result: r, prev_count, history });
-                let _ = tx.send(Resp::Scan { gid, pid, value, first, result });
+                let has_values = sc.has_unknown_values();
+                let result = result.map(|r| ScanOut {
+                    result: r,
+                    prev_count,
+                    history,
+                    has_values,
+                });
+                let _ = tx.send(Resp::Scan {
+                    gid,
+                    pid,
+                    mode,
+                    result,
+                });
             }
             Req::Undo { gid, pid } => {
                 let _ = sc.attach_to_pid(pid);
                 let result = sc.undo_scan().map(|mut r| {
-                    // O scanner devolve valores a 0: lemos os valores reais das linhas mostradas.
-                    let items: Vec<(u64, usize)> = r.shown.iter().map(|(a, w, _)| (*a, *w)).collect();
+                    // O scanner devolve valores a 0 no modo exato: lemos os valores
+                    // reais das linhas mostradas. No modo desconhecido já vêm guardados.
+                    if sc.has_unknown_values() {
+                        return ScanOut {
+                            prev_count: sc.candidate_count(),
+                            history: sc.history_len(),
+                            has_values: true,
+                            result: r,
+                        };
+                    }
+                    let items: Vec<(u64, usize)> =
+                        r.shown.iter().map(|(a, w, _)| (*a, *w)).collect();
                     if let Ok(vals) = sc.read_values(&items) {
                         for (row, v) in r.shown.iter_mut().zip(vals) {
                             if let Some(x) = v {
@@ -530,11 +721,21 @@ fn worker_loop(rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context, cancel: 
                             }
                         }
                     }
-                    ScanOut { prev_count: sc.candidate_count(), history: sc.history_len(), result: r }
+                    ScanOut {
+                        prev_count: sc.candidate_count(),
+                        history: sc.history_len(),
+                        has_values: false,
+                        result: r,
+                    }
                 });
                 let _ = tx.send(Resp::Undo { gid, pid, result });
             }
-            Req::Write { gid, rows, pid, items } => {
+            Req::Write {
+                gid,
+                rows,
+                pid,
+                items,
+            } => {
                 let _ = sc.attach_to_pid(pid);
                 let tuples: Vec<(u64, usize, Num)> =
                     items.iter().map(|w| (w.addr, w.width, w.value)).collect();
@@ -545,9 +746,15 @@ fn worker_loop(rx: Receiver<Req>, tx: Sender<Resp>, ctx: egui::Context, cancel: 
                 let results = items.into_iter().zip(results).collect();
                 let _ = tx.send(Resp::Write { gid, rows, results });
             }
-            Req::Sync { gid, pid, writes, reads } => {
+            Req::Sync {
+                gid,
+                pid,
+                writes,
+                reads,
+            } => {
                 let _ = sc.attach_to_pid(pid);
-                let wt: Vec<(u64, usize, Num)> = writes.iter().map(|w| (w.addr, w.width, w.value)).collect();
+                let wt: Vec<(u64, usize, Num)> =
+                    writes.iter().map(|w| (w.addr, w.width, w.value)).collect();
                 let result = sc.sync(&wt, &reads).map(|(wres, rvals)| SyncOut {
                     write_error: wres.into_iter().find_map(|r| r.err()),
                     reads: reads.iter().copied().zip(rvals).collect(),
@@ -584,6 +791,8 @@ pub struct BSDConquerorApp {
     // estado da pesquisa
     scan_has_results: bool,
     scan_pid: Option<i32>,
+    /// Há um instantâneo válido para continuar a pesquisa de valor desconhecido?
+    unknown_ready: bool,
     locked: HashMap<Key, Num>,
     last_sync: Instant,
     sync_now: bool,
@@ -592,6 +801,8 @@ pub struct BSDConquerorApp {
     // controlos
     value_input: String,
     scan_kind: usize,
+    unknown_width: usize,
+    search_mode: Comparison,
     focus_filter_once: bool,
     focus_value_once: bool,
 
@@ -628,7 +839,7 @@ impl BSDConquerorApp {
         let prefs = Prefs::load();
         i18n::set_language(&prefs.lang);
         let ctx = &cc.egui_ctx;
-        ctx.set_visuals(egui::Visuals::light());
+        apply_theme_pref(ctx, &prefs.theme);
         egui_extras::install_image_loaders(ctx);
         ctx.set_zoom_factor(prefs.zoom);
 
@@ -650,11 +861,13 @@ impl BSDConquerorApp {
         // Ícone da janela.
         if let Ok(img) = image::load_from_memory(include_bytes!("../icons/app-128x128.png")) {
             let rgba = img.to_rgba8();
-            ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(Arc::new(egui::IconData {
-                width: rgba.width(),
-                height: rgba.height(),
-                rgba: rgba.into_raw(),
-            }))));
+            ctx.send_viewport_cmd(egui::ViewportCommand::Icon(Some(Arc::new(
+                egui::IconData {
+                    width: rgba.width(),
+                    height: rgba.height(),
+                    rgba: rgba.into_raw(),
+                },
+            ))));
         }
 
         let cancel = Arc::new(AtomicBool::new(false));
@@ -683,12 +896,15 @@ impl BSDConquerorApp {
             undo_depth: 0,
             scan_has_results: false,
             scan_pid: None,
+            unknown_ready: false,
             locked: HashMap::new(),
             last_sync: Instant::now(),
             sync_now: false,
             sync_fails: 0,
             value_input: String::new(),
             scan_kind: prefs.scan_kind,
+            unknown_width: prefs.unknown_width,
+            search_mode: prefs.search_mode,
             focus_filter_once: true,
             focus_value_once: false,
             found_total: 0,
@@ -700,7 +916,9 @@ impl BSDConquerorApp {
             cursor: None,
             anchor: None,
             editing: None,
-            status: tr("Select a process, type a value and search (processes of other users require root)."),
+            status: tr(
+                "Select a process, type a value and search (processes of other users require root).",
+            ),
             popup: None,
             col_results: prefs.col_results,
             col_found: prefs.col_found,
@@ -735,7 +953,11 @@ impl BSDConquerorApp {
     fn show_alert(&mut self, title: impl Into<String>, msg: impl Into<String>) {
         let msg = msg.into();
         self.status = msg.lines().next().unwrap_or("").to_string();
-        self.popup = Some(Popup { title: title.into(), msg, armed: false });
+        self.popup = Some(Popup {
+            title: title.into(),
+            msg,
+            armed: false,
+        });
     }
 
     // ── preferências ──
@@ -746,10 +968,11 @@ impl BSDConquerorApp {
             (v.inner_rect, v.minimized, v.maximized)
         });
         let z = ctx.zoom_factor();
-        if minimized != Some(true) && maximized != Some(true) {
-            if let Some(r) = rect {
-                self.win_size = Some((r.width() * z, r.height() * z));
-            }
+        if minimized != Some(true)
+            && maximized != Some(true)
+            && let Some(r) = rect
+        {
+            self.win_size = Some((r.width() * z, r.height() * z));
         }
         self.cur_prefs = Prefs {
             zoom: z,
@@ -760,7 +983,10 @@ impl BSDConquerorApp {
             left_w: self.left_w,
             top_h: self.top_h,
             scan_kind: self.scan_kind,
+            unknown_width: self.unknown_width,
+            search_mode: self.search_mode,
             lang: i18n::language(),
+            theme: normalize_theme(&self.cur_prefs.theme),
         };
         if self.last_prefs_check.elapsed() >= Duration::from_secs(1) {
             self.last_prefs_check = Instant::now();
@@ -782,10 +1008,16 @@ impl BSDConquerorApp {
         match self.sort_col {
             0 => self.processes.sort_by_key(|p| p.pid),
             1 => self.processes.sort_by(|a, b| {
-                a.user.to_lowercase().cmp(&b.user.to_lowercase()).then(a.pid.cmp(&b.pid))
+                a.user
+                    .to_lowercase()
+                    .cmp(&b.user.to_lowercase())
+                    .then(a.pid.cmp(&b.pid))
             }),
             _ => self.processes.sort_by(|a, b| {
-                a.command.to_lowercase().cmp(&b.command.to_lowercase()).then(a.pid.cmp(&b.pid))
+                a.command
+                    .to_lowercase()
+                    .cmp(&b.command.to_lowercase())
+                    .then(a.pid.cmp(&b.pid))
             }),
         }
         if !self.sort_asc {
@@ -796,11 +1028,11 @@ impl BSDConquerorApp {
     fn refresh_processes(&mut self) {
         self.processes = scanner::list_processes();
         self.sort_processes();
-        if let Some(pid) = self.selected_pid {
-            if !self.processes.iter().any(|p| p.pid == pid) {
-                self.selected_pid = None;
-                self.selected_info = None;
-            }
+        if let Some(pid) = self.selected_pid
+            && !self.processes.iter().any(|p| p.pid == pid)
+        {
+            self.selected_pid = None;
+            self.selected_info = None;
         }
         self.status = trf("{} processes listed.", &[&self.processes.len()]);
     }
@@ -813,6 +1045,7 @@ impl BSDConquerorApp {
         self.undo_depth = 0;
         self.scan_has_results = false;
         self.scan_pid = None;
+        self.unknown_ready = false;
         self.clear_found_view();
         self.found_total = 0;
         self.clear_work_list();
@@ -830,37 +1063,113 @@ impl BSDConquerorApp {
             return;
         }
         let Some(pid) = self.selected_pid else {
-            self.show_alert(tr("BSDConqueror - Error"), tr("Select a process in the list first!"));
+            self.show_alert(
+                tr("BSDConqueror - Error"),
+                tr("Select a process in the list first!"),
+            );
             return;
         };
         let raw = self.value_input.trim().to_string();
+        let gid = self.generation;
+        self.sync_fails = 0;
+        self.searching = true;
+
+        if self.scan_kind == KIND_UNKNOWN {
+            let first = !(self.unknown_ready && self.scan_pid == Some(pid));
+            let mode = if first {
+                self.status = trf(
+                    "Snapshot: PID {}, type {}… (the process is paused during the scan)",
+                    &[&pid, &kind_name(self.unknown_width)],
+                );
+                ScanMode::UnknownFirst {
+                    width: self.unknown_width,
+                }
+            } else {
+                let comparison = self.search_mode;
+                let value = if comparison == Comparison::Equal {
+                    let Some(v) = parse_num(&raw) else {
+                        self.searching = false;
+                        if raw.is_empty() {
+                            self.status = tr("Type a value to search for.");
+                        } else {
+                            self.show_alert(
+                                tr("BSDConqueror - Invalid input"),
+                                tr("Enter a valid value to search for!"),
+                            );
+                        }
+                        return;
+                    };
+                    Some(v)
+                } else {
+                    None
+                };
+                self.status = trf(
+                    "Comparison '{}': PID {}, type {}… (the process is paused during the scan)",
+                    &[
+                        &tr(comparison_name(comparison)),
+                        &pid,
+                        &kind_name(self.unknown_width),
+                    ],
+                );
+                ScanMode::UnknownNext {
+                    width: self.unknown_width,
+                    comparison,
+                    value,
+                }
+            };
+            if first {
+                self.clear_found_view();
+            }
+            self.focus_value_once = true;
+            self.send_job(Req::Scan { gid, pid, mode });
+            return;
+        }
+
         if raw.is_empty() {
-            self.status = tr("Type an integer value to search for.");
+            self.searching = false;
+            self.status = tr("Type a value to search for.");
             return;
         }
         let Some(value) = parse_num(&raw) else {
+            self.searching = false;
             self.show_alert(
                 tr("BSDConqueror - Invalid input"),
-                tr("Enter a valid integer value to search for!"),
+                tr("Enter a valid value to search for!"),
             );
             return;
         };
         let first = !(self.scan_has_results && self.scan_pid == Some(pid));
-        let mode = if first { tr("Search") } else { tr("Next Search") };
-        self.sync_fails = 0;
-        self.searching = true;
-        self.status = if self.scan_kind == SCAN_NAMES.len() - 1 {
-            trf("{}: PID {}, value {}… (Auto mode: may take a long time)", &[&mode, &pid, &value])
+        let mode = if first {
+            tr("Search")
         } else {
-            trf("{}: PID {}, value {}… (the process is paused during the search)", &[&mode, &pid, &value])
+            tr("Next Search")
+        };
+        self.unknown_ready = false;
+        self.status = if self.scan_kind == KIND_AUTO {
+            trf(
+                "{}: PID {}, value {}… (Auto mode: may take a long time)",
+                &[&mode, &pid, &value],
+            )
+        } else {
+            trf(
+                "{}: PID {}, value {}… (the process is paused during the search)",
+                &[&mode, &pid, &value],
+            )
         };
         if first {
             self.clear_found_view();
         }
         self.focus_value_once = true;
-        let gid = self.generation;
         let widths = scan_widths(self.scan_kind).to_vec();
-        self.send_job(Req::Scan { gid, pid, value, widths, first });
+        self.send_job(Req::Scan {
+            gid,
+            pid,
+            mode: ScanMode::Exact {
+                value,
+                widths,
+                first,
+            },
+        });
     }
 
     /// Desfaz a última pesquisa.
@@ -879,6 +1188,7 @@ impl BSDConquerorApp {
         match result {
             Ok(out) => {
                 self.undo_depth = out.history;
+                self.unknown_ready = out.has_values;
                 let r = out.result;
                 self.clear_found_view();
                 for (a, w, v) in &r.shown {
@@ -897,7 +1207,10 @@ impl BSDConquerorApp {
                 self.sync_now = true;
             }
             Err(e) => {
-                self.show_alert(tr("BSDConqueror - Execution error"), trf("Error: {}", &[&e]));
+                self.show_alert(
+                    tr("BSDConqueror - Execution error"),
+                    trf("Error: {}", &[&e]),
+                );
             }
         }
     }
@@ -916,19 +1229,25 @@ impl BSDConquerorApp {
         self.editing = None;
     }
 
-    fn finish_scan(&mut self, pid: i32, value: Num, first: bool, result: Result<ScanOut, String>) {
-        let mode = if first { tr("Search") } else { tr("Next Search") };
+    fn finish_scan(&mut self, pid: i32, mode: ScanMode, result: Result<ScanOut, String>) {
         match result {
             Ok(out) => {
                 self.undo_depth = out.history;
+                self.unknown_ready = out.has_values;
                 let r = out.result;
                 if r.kept_previous {
-                    // Nenhum candidato com este valor: os anteriores mantêm-se.
                     let sample: Vec<String> = r.sample.iter().map(|v| v.to_string()).collect();
-                    self.status = trf(
-                        "None of the {} addresses has the value {}. Current values (sample): {}.",
-                        &[&out.prev_count, &value, &sample.join(", ")],
-                    );
+                    self.status = match &mode {
+                        ScanMode::Exact { value, .. } => trf(
+                            "None of the {} addresses has the value {}. Current values (sample): {}.",
+                            &[&out.prev_count, value, &sample.join(", ")],
+                        ),
+                        ScanMode::UnknownNext { comparison, .. } => trf(
+                            "No addresses matched '{}'. Current values (sample): {}.",
+                            &[&tr(comparison_name(*comparison)), &sample.join(", ")],
+                        ),
+                        _ => String::new(),
+                    };
                     self.sync_now = true;
                     return;
                 }
@@ -950,18 +1269,45 @@ impl BSDConquerorApp {
                 } else {
                     String::new()
                 };
-                self.status = if r.total == 0 {
-                    trf("{}: no address with the value {}.", &[&mode, &value])
-                } else {
-                    trf(
-                        "{}: {} addresses (showing {}).{}",
-                        &[&mode, &r.total, &r.shown.len(), &trunc],
-                    )
+                self.status = match &mode {
+                    ScanMode::Exact { value, first, .. } => {
+                        let label = if *first {
+                            tr("Search")
+                        } else {
+                            tr("Next Search")
+                        };
+                        if r.total == 0 {
+                            trf("{}: no address with the value {}.", &[&label, value])
+                        } else {
+                            trf(
+                                "{}: {} addresses (showing {}).{}",
+                                &[&label, &r.total, &r.shown.len(), &trunc],
+                            )
+                        }
+                    }
+                    ScanMode::UnknownFirst { width } => trf(
+                        "Snapshot: {} addresses of type {}.{}",
+                        &[&r.total, &kind_name(*width), &trunc],
+                    ),
+                    ScanMode::UnknownNext { comparison, .. } => {
+                        let label = tr(comparison_name(*comparison));
+                        if r.total == 0 {
+                            trf("{}: no addresses.", &[&label])
+                        } else {
+                            trf(
+                                "{}: {} addresses (showing {}).{}",
+                                &[&label, &r.total, &r.shown.len(), &trunc],
+                            )
+                        }
+                    }
                 };
                 self.sync_now = true;
             }
             Err(e) => {
-                self.show_alert(tr("BSDConqueror - Execution error"), trf("Error: {}", &[&e]));
+                self.show_alert(
+                    tr("BSDConqueror - Execution error"),
+                    trf("Error: {}", &[&e]),
+                );
             }
         }
     }
@@ -983,21 +1329,22 @@ impl BSDConquerorApp {
             return;
         };
         let Some(value) = parse_num(&text) else {
-            self.status = tr("Invalid integer value.");
+            self.status = tr("Invalid value.");
             return;
         };
-        let targets: Vec<usize> = if self.selected_rows.contains(&row) && self.selected_rows.len() > 1 {
-            let mut v: Vec<usize> = self
-                .selected_rows
-                .iter()
-                .copied()
-                .filter(|i| *i < self.result_rows.len())
-                .collect();
-            v.sort_unstable();
-            v
-        } else {
-            vec![row]
-        };
+        let targets: Vec<usize> =
+            if self.selected_rows.contains(&row) && self.selected_rows.len() > 1 {
+                let mut v: Vec<usize> = self
+                    .selected_rows
+                    .iter()
+                    .copied()
+                    .filter(|i| *i < self.result_rows.len())
+                    .collect();
+                v.sort_unstable();
+                v
+            } else {
+                vec![row]
+            };
         let rows: Vec<(Key, bool)> = targets
             .iter()
             .map(|&i| (self.result_rows[i].key(), self.result_rows[i].locked))
@@ -1012,10 +1359,19 @@ impl BSDConquerorApp {
             .collect();
         self.status = trf("Writing {} to {} address(es)…", &[&value, &items.len()]);
         let gid = self.generation;
-        self.send_job(Req::Write { gid, rows, pid, items });
+        self.send_job(Req::Write {
+            gid,
+            rows,
+            pid,
+            items,
+        });
     }
 
-    fn finish_write(&mut self, rows: Vec<(Key, bool)>, results: Vec<(WriteItem, Result<(), String>)>) {
+    fn finish_write(
+        &mut self,
+        rows: Vec<(Key, bool)>,
+        results: Vec<(WriteItem, Result<(), String>)>,
+    ) {
         let total = results.len();
         let mut ok = 0usize;
         let mut first_err: Option<String> = None;
@@ -1044,7 +1400,10 @@ impl BSDConquerorApp {
         if let Some(e) = first_err {
             self.show_alert(
                 tr("BSDConqueror - Write error"),
-                trf("{} of {} writes failed.\n\n{}", &[&(total - ok), &total, &e]),
+                trf(
+                    "{} of {} writes failed.\n\n{}",
+                    &[&(total - ok), &total, &e],
+                ),
             );
             return;
         }
@@ -1062,12 +1421,17 @@ impl BSDConquerorApp {
         while let Ok(resp) = self.resp_rx.try_recv() {
             self.in_flight = self.in_flight.saturating_sub(1);
             match resp {
-                Resp::Scan { gid, pid, value, first, result } => {
+                Resp::Scan {
+                    gid,
+                    pid,
+                    mode,
+                    result,
+                } => {
                     if gid != self.generation {
                         continue;
                     }
                     self.searching = false;
-                    self.finish_scan(pid, value, first, result);
+                    self.finish_scan(pid, mode, result);
                 }
                 Resp::Undo { gid, pid, result } => {
                     if gid != self.generation {
@@ -1142,7 +1506,12 @@ impl BSDConquerorApp {
             }
         }
         let gid = self.generation;
-        self.send_job(Req::Sync { gid, pid, writes, reads });
+        self.send_job(Req::Sync {
+            gid,
+            pid,
+            writes,
+            reads,
+        });
     }
 
     /// Atualiza os valores mostrados (listas Found e de baixo) por (endereço, largura).
@@ -1174,9 +1543,12 @@ impl BSDConquerorApp {
     /// Lock/unlock. Se a linha clicada pertence a uma multisseleção, aplica-se
     /// a todas as linhas selecionadas (cada uma fica fixa no seu valor atual).
     fn on_lock_toggled(&mut self, i: usize) {
-        let Some(first) = self.result_rows.get(i) else { return };
+        let Some(first) = self.result_rows.get(i) else {
+            return;
+        };
         let lock = !first.locked;
-        let targets: Vec<usize> = if self.selected_rows.contains(&i) && self.selected_rows.len() > 1 {
+        let targets: Vec<usize> = if self.selected_rows.contains(&i) && self.selected_rows.len() > 1
+        {
             let mut v: Vec<usize> = self
                 .selected_rows
                 .iter()
@@ -1250,6 +1622,7 @@ impl BSDConquerorApp {
         self.undo_depth = 0;
         self.scan_has_results = false;
         self.scan_pid = None;
+        self.unknown_ready = false;
         self.clear_found_view();
         self.found_total = 0;
         self.value_input.clear();
@@ -1270,13 +1643,19 @@ impl BSDConquerorApp {
     }
 
     // DEPOIS:
-	fn click_row(&mut self, i: usize, ctrl: bool, shift: bool) {
-	    apply_click(&mut self.selected_rows, &mut self.anchor, i, ctrl, shift);
-	    self.cursor = Some(i);
-	}
+    fn click_row(&mut self, i: usize, ctrl: bool, shift: bool) {
+        apply_click(&mut self.selected_rows, &mut self.anchor, i, ctrl, shift);
+        self.cursor = Some(i);
+    }
 
     fn click_found(&mut self, i: usize, ctrl: bool, shift: bool) {
-        apply_click(&mut self.found_selected, &mut self.found_anchor, i, ctrl, shift);
+        apply_click(
+            &mut self.found_selected,
+            &mut self.found_anchor,
+            i,
+            ctrl,
+            shift,
+        );
     }
 
     /// Copia linhas da lista Found para a lista de baixo (sem duplicar).
@@ -1284,7 +1663,9 @@ impl BSDConquerorApp {
         let mut added = 0usize;
         let mut dup = 0usize;
         for &i in idx {
-            let Some(r) = self.found_rows.get(i) else { continue };
+            let Some(r) = self.found_rows.get(i) else {
+                continue;
+            };
             if self.result_rows.iter().any(|x| x.key() == r.key()) {
                 dup += 1;
                 continue;
@@ -1296,7 +1677,10 @@ impl BSDConquerorApp {
             added += 1;
         }
         self.status = if dup > 0 {
-            trf("{} address(es) added; {} were already in the list.", &[&added, &dup])
+            trf(
+                "{} address(es) added; {} were already in the list.",
+                &[&added, &dup],
+            )
         } else {
             trf("{} address(es) added to the lower list.", &[&added])
         };
@@ -1349,7 +1733,12 @@ impl BSDConquerorApp {
                 EditCol::Desc => r.description.clone(),
                 EditCol::Value => r.value.clone(),
             };
-            self.editing = Some(Edit { row: i, col, text, need_focus: true });
+            self.editing = Some(Edit {
+                row: i,
+                col,
+                text,
+                need_focus: true,
+            });
             self.cursor = Some(i);
         }
     }
@@ -1389,54 +1778,66 @@ impl BSDConquerorApp {
         let mut dbl: Option<usize> = None;
         let mut fact: Option<FoundAct> = None;
         let hdr = [tr("Address"), tr("Type"), tr("Value")];
-        let (_, hr) =
-            draw_row(ui, &w, &[hdr[0].as_str(), hdr[1].as_str(), hdr[2].as_str()], &[false; 3], false, false, true);
+        let (_, hr) = draw_row(
+            ui,
+            &w,
+            &[hdr[0].as_str(), hdr[1].as_str(), hdr[2].as_str()],
+            &[false; 3],
+            false,
+            false,
+            true,
+        );
         col_handles(ui, &hr, &mut self.col_found, k, "found");
-        egui::ScrollArea::vertical().auto_shrink([false, false]).show(ui, |ui| {
-            ui.spacing_mut().item_spacing.y = 0.0;
-            for (i, row) in self.found_rows.iter().enumerate() {
-                let sel = self.found_selected.contains(&i);
-                let a = row.addr_text();
-                let t = row.kind_text();
-                let (resp, _) = draw_row(
-                    ui,
-                    &w,
-                    &[a.as_str(), t.as_str(), row.value.as_str()],
-                    &[true, false, true],
-                    sel,
-                    i % 2 == 1,
-                    false,
-                );
-                if resp.secondary_clicked() && !sel {
-                    click = Some((i, false, false)); // o botão direito seleciona a linha
+        egui::ScrollArea::vertical()
+            .auto_shrink([false, false])
+            .show(ui, |ui| {
+                ui.spacing_mut().item_spacing.y = 0.0;
+                for (i, row) in self.found_rows.iter().enumerate() {
+                    let sel = self.found_selected.contains(&i);
+                    let a = row.addr_text();
+                    let t = row.kind_text();
+                    let (resp, _) = draw_row(
+                        ui,
+                        &w,
+                        &[a.as_str(), t.as_str(), row.value.as_str()],
+                        &[true, false, true],
+                        sel,
+                        i % 2 == 1,
+                        false,
+                    );
+                    if resp.secondary_clicked() && !sel {
+                        click = Some((i, false, false)); // o botão direito seleciona a linha
+                    }
+                    resp.clone().context_menu(|ui| {
+                        if ui.button(tr("Add to list")).clicked() {
+                            fact = Some(FoundAct::Add);
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui.button(tr("Copy address")).clicked() {
+                            ui.ctx().copy_text(a.clone());
+                            ui.close_menu();
+                        }
+                        if ui.button(tr("Copy value")).clicked() {
+                            ui.ctx().copy_text(row.value.clone());
+                            ui.close_menu();
+                        }
+                        ui.separator();
+                        if ui
+                            .add(egui::Button::new(tr("Select all")).shortcut_text("Ctrl+A"))
+                            .clicked()
+                        {
+                            fact = Some(FoundAct::SelectAll);
+                            ui.close_menu();
+                        }
+                    });
+                    if resp.double_clicked() {
+                        dbl = Some(i);
+                    } else if resp.clicked() {
+                        click = Some((i, mods.command, mods.shift));
+                    }
                 }
-                resp.clone().context_menu(|ui| {
-                    if ui.button(tr("Add to list")).clicked() {
-                        fact = Some(FoundAct::Add);
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.button(tr("Copy address")).clicked() {
-                        ui.ctx().copy_text(a.clone());
-                        ui.close_menu();
-                    }
-                    if ui.button(tr("Copy value")).clicked() {
-                        ui.ctx().copy_text(row.value.clone());
-                        ui.close_menu();
-                    }
-                    ui.separator();
-                    if ui.add(egui::Button::new(tr("Select all")).shortcut_text("Ctrl+A")).clicked() {
-                        fact = Some(FoundAct::SelectAll);
-                        ui.close_menu();
-                    }
-                });
-                if resp.double_clicked() {
-                    dbl = Some(i);
-                } else if resp.clicked() {
-                    click = Some((i, mods.command, mods.shift));
-                }
-            }
-        });
+            });
         if let Some((i, c, sh)) = click {
             self.click_found(i, c, sh);
         }
@@ -1467,7 +1868,10 @@ impl BSDConquerorApp {
                 self.focus_filter_once = false;
             }
             if ui
-                .add(egui::Button::image_and_text(ico(ui, Icon::Refresh), tr("Refresh")))
+                .add(egui::Button::image_and_text(
+                    ico(ui, Icon::Refresh),
+                    tr("Refresh"),
+                ))
                 .clicked()
             {
                 self.refresh_processes();
@@ -1511,12 +1915,13 @@ impl BSDConquerorApp {
                         egui::pos2(cx, cy + sz * 0.8),
                     ]
                 };
-                ui.painter().add(egui::Shape::convex_polygon(pts, ACCENT, egui::Stroke::NONE));
+                ui.painter()
+                    .add(egui::Shape::convex_polygon(pts, ACCENT, egui::Stroke::NONE));
             }
-            if resp.clicked() {
-                if let Some(pos) = resp.interact_pointer_pos() {
-                    new_sort = rects.iter().position(|r| r.contains(pos));
-                }
+            if resp.clicked()
+                && let Some(pos) = resp.interact_pointer_pos()
+            {
+                new_sort = rects.iter().position(|r| r.contains(pos));
             }
             egui::ScrollArea::vertical()
                 .max_height(proc_h)
@@ -1586,15 +1991,18 @@ impl BSDConquerorApp {
             }
             self.sort_processes();
         }
-        if let Some(p) = clicked {
-            if self.selected_pid != Some(p.pid) {
-                self.on_process_selected(&p);
-            }
+        if let Some(p) = clicked
+            && self.selected_pid != Some(p.pid)
+        {
+            self.on_process_selected(&p);
         }
 
         match &self.selected_info {
             Some((cmd, pid, user)) => {
-                ui.label(trf("Selected: {}  |  PID: {}  |  User: {}", &[cmd, pid, user]));
+                ui.label(trf(
+                    "Selected: {}  |  PID: {}  |  User: {}",
+                    &[cmd, pid, user],
+                ));
             }
             None => {
                 ui.label(tr("No process selected"));
@@ -1606,9 +2014,14 @@ impl BSDConquerorApp {
         ui.horizontal(|ui| {
             ui.label(tr("Value:"));
             let w = (ui.available_width() - 330.0).max(60.0);
+            let hint = if self.scan_kind == KIND_UNKNOWN {
+                tr("Value (only used with Equal to)")
+            } else {
+                tr("Value, e.g. 123456 or 1.5")
+            };
             let resp = ui.add(
                 egui::TextEdit::singleline(&mut self.value_input)
-                    .hint_text(tr("Integer value, e.g. 123456"))
+                    .hint_text(hint)
                     .desired_width(w),
             );
             if self.focus_value_once {
@@ -1616,7 +2029,11 @@ impl BSDConquerorApp {
                 self.focus_value_once = false;
             }
             let enter = resp.lost_focus() && ui.input(|i| i.key_pressed(egui::Key::Enter));
-            let label = if self.scan_has_results { tr("Next Search") } else { tr("Search") };
+            let label = if self.scan_has_results {
+                tr("Next Search")
+            } else {
+                tr("Search")
+            };
             let can = !self.searching;
             let search_btn = egui::Button::image_and_text(ico(ui, Icon::Search), label);
             if ui.add_enabled(can, search_btn).clicked() || (enter && can) {
@@ -1631,7 +2048,10 @@ impl BSDConquerorApp {
                 self.on_undo();
             }
             if ui
-                .add(egui::Button::image_and_text(ico(ui, Icon::Reset), tr("Reset")))
+                .add(egui::Button::image_and_text(
+                    ico(ui, Icon::Reset),
+                    tr("Reset"),
+                ))
                 .clicked()
             {
                 self.on_reset();
@@ -1641,14 +2061,47 @@ impl BSDConquerorApp {
         // Tamanho dos valores a procurar (largura em bytes).
         ui.horizontal(|ui| {
             ui.label(tr("Data type:"));
+            let mut new_kind = self.scan_kind;
             egui::ComboBox::new("scan_kind_combo", "")
                 .selected_text(tr(SCAN_NAMES[self.scan_kind]))
                 .show_ui(ui, |ui| {
                     for (i, n) in SCAN_NAMES.iter().enumerate() {
-                        ui.selectable_value(&mut self.scan_kind, i, tr(n));
+                        ui.selectable_value(&mut new_kind, i, tr(n));
                     }
                 });
+            if new_kind != self.scan_kind {
+                self.scan_kind = new_kind;
+                self.on_reset();
+            }
         });
+
+        if self.scan_kind == KIND_UNKNOWN {
+            ui.horizontal(|ui| {
+                ui.label(tr("Unknown value type:"));
+                let mut new_width = self.unknown_width;
+                egui::ComboBox::new("unknown_width_combo", "")
+                    .selected_text(kind_name(self.unknown_width))
+                    .show_ui(ui, |ui| {
+                        for &w in &UNKNOWN_WIDTHS {
+                            ui.selectable_value(&mut new_width, w, kind_name(w));
+                        }
+                    });
+                if new_width != self.unknown_width {
+                    self.unknown_width = new_width;
+                    self.on_reset();
+                }
+            });
+            ui.horizontal(|ui| {
+                ui.label(tr("Comparison:"));
+                egui::ComboBox::new("search_mode_combo", "")
+                    .selected_text(tr(comparison_name(self.search_mode)))
+                    .show_ui(ui, |ui| {
+                        for (mode, name) in COMPARISONS {
+                            ui.selectable_value(&mut self.search_mode, mode, tr(name));
+                        }
+                    });
+            });
+        }
 
         ui.label(tr("Native scan (ptrace): the target process is paused briefly while scanning. Lock: click the padlock to keep writing a value."));
     }
@@ -1697,11 +2150,23 @@ impl BSDConquerorApp {
         let cr = self.col_results;
         let w = [cr[0] * k, cr[1] * k, cr[2] * k, cr[3] * k, 0.0];
         ui.spacing_mut().item_spacing.y = 0.0;
-        let hdr = [tr("Lock"), tr("Description"), tr("Address"), tr("Type"), tr("Value")];
+        let hdr = [
+            tr("Lock"),
+            tr("Description"),
+            tr("Address"),
+            tr("Type"),
+            tr("Value"),
+        ];
         let (_, hr) = draw_row(
             ui,
             &w,
-            &[hdr[0].as_str(), hdr[1].as_str(), hdr[2].as_str(), hdr[3].as_str(), hdr[4].as_str()],
+            &[
+                hdr[0].as_str(),
+                hdr[1].as_str(),
+                hdr[2].as_str(),
+                hdr[3].as_str(),
+                hdr[4].as_str(),
+            ],
             &[false; 5],
             false,
             false,
@@ -1782,8 +2247,8 @@ impl BSDConquerorApp {
                     }
                 });
 
-                if let Some(e) = editing.as_mut() {
-                    if e.row == i {
+                if let Some(e) = editing.as_mut()
+                    && e.row == i {
                         let col = e.col;
                         let (rect, mono) = if col == EditCol::Desc { (rects[1], false) } else { (rects[4], true) };
                         let mut te = egui::TextEdit::singleline(&mut e.text)
@@ -1805,7 +2270,6 @@ impl BSDConquerorApp {
                             }
                         }
                     }
-                }
 
                 if !(ed_desc || ed_val) {
                     let mut handled = false;
@@ -1869,6 +2333,30 @@ impl BSDConquerorApp {
         }
     }
 
+    fn refresh_status_text(&mut self) {
+        if self.searching || self.in_flight > 0 {
+            return;
+        }
+        if self.scan_has_results {
+            self.status = trf("Found: {}", &[&self.found_total]);
+        } else if self.unknown_ready {
+            self.status = trf(
+                "Snapshot: {} addresses of type {}.{}",
+                &[
+                    &self.found_total,
+                    &kind_name(self.unknown_width),
+                    &String::new(),
+                ],
+            );
+        } else if let Some(info) = &self.selected_info {
+            self.status = trf("Process selected: {} (PID {}).", &[&info.0, &info.1]);
+        } else {
+            self.status = tr(
+                "Select a process, type a value and search (processes of other users require root).",
+            );
+        }
+    }
+
     /// Barra de menus (File, Search, List, View, Help).
     fn ui_menu(&mut self, ctx: &egui::Context) {
         #[derive(Clone, Copy)]
@@ -1885,6 +2373,7 @@ impl BSDConquerorApp {
             About,
             Undo,
             Lang(&'static str),
+            Theme(&'static str),
         }
         let mut act: Option<Act> = None;
         let can_undo = self.undo_depth > 0 && !self.searching;
@@ -1899,7 +2388,10 @@ impl BSDConquerorApp {
                         ui.close_menu();
                     }
                     ui.separator();
-                    if ui.add(egui::Button::new(tr("Quit")).shortcut_text("Ctrl+Q")).clicked() {
+                    if ui
+                        .add(egui::Button::new(tr("Quit")).shortcut_text("Ctrl+Q"))
+                        .clicked()
+                    {
                         act = Some(Act::Quit);
                         ui.close_menu();
                     }
@@ -1942,16 +2434,39 @@ impl BSDConquerorApp {
                     }
                 });
                 ui.menu_button(tr("View"), |ui| {
-                    if ui.add(egui::Button::new(tr("Zoom in")).shortcut_text("Ctrl +")).clicked() {
+                    if ui
+                        .add(egui::Button::new(tr("Zoom in")).shortcut_text("Ctrl +"))
+                        .clicked()
+                    {
                         act = Some(Act::ZoomIn);
                     }
-                    if ui.add(egui::Button::new(tr("Zoom out")).shortcut_text("Ctrl -")).clicked() {
+                    if ui
+                        .add(egui::Button::new(tr("Zoom out")).shortcut_text("Ctrl -"))
+                        .clicked()
+                    {
                         act = Some(Act::ZoomOut);
                     }
-                    if ui.add(egui::Button::new(tr("Reset zoom")).shortcut_text("Ctrl 0")).clicked() {
+                    if ui
+                        .add(egui::Button::new(tr("Reset zoom")).shortcut_text("Ctrl 0"))
+                        .clicked()
+                    {
                         act = Some(Act::ZoomReset);
                         ui.close_menu();
                     }
+                    ui.separator();
+                    ui.menu_button(tr("Theme"), |ui| {
+                        let current = normalize_theme(&self.cur_prefs.theme);
+                        for (code, name) in [
+                            ("light", tr("Light")),
+                            ("dark", tr("Dark")),
+                            ("system", tr("System")),
+                        ] {
+                            if ui.radio(current == code, name).clicked() {
+                                act = Some(Act::Theme(code));
+                                ui.close_menu();
+                            }
+                        }
+                    });
                 });
                 ui.menu_button(tr("Language"), |ui| {
                     for (code, name) in i18n::LANGUAGES {
@@ -1995,7 +2510,17 @@ impl BSDConquerorApp {
                 self.show_alert(tr("About BSDConqueror"), text);
             }
 
-            Some(Act::Lang(code)) => i18n::set_language(code),
+            Some(Act::Lang(code)) => {
+                i18n::set_language(code);
+                self.cur_prefs.lang = i18n::language();
+                self.flush_prefs();
+                self.refresh_status_text();
+            }
+            Some(Act::Theme(code)) => {
+                self.cur_prefs.theme = normalize_theme(code);
+                apply_theme_pref(ctx, &self.cur_prefs.theme);
+                self.flush_prefs();
+            }
             None => {}
         }
     }
@@ -2044,10 +2569,13 @@ impl eframe::App for BSDConquerorApp {
     /// repomos o comportamento esperado.
     fn raw_input_hook(&mut self, _ctx: &egui::Context, raw_input: &mut egui::RawInput) {
         for ev in &mut raw_input.events {
-            if let egui::Event::Key { key, physical_key, .. } = ev {
-                if *key == egui::Key::Delete && *physical_key == Some(egui::Key::Backspace) {
-                    *key = egui::Key::Backspace;
-                }
+            if let egui::Event::Key {
+                key, physical_key, ..
+            } = ev
+                && *key == egui::Key::Delete
+                && *physical_key == Some(egui::Key::Backspace)
+            {
+                *key = egui::Key::Backspace;
             }
         }
     }
@@ -2055,11 +2583,11 @@ impl eframe::App for BSDConquerorApp {
     fn update(&mut self, ctx: &egui::Context, _frame: &mut eframe::Frame) {
         // Restaura o tamanho guardado da janela (já com o zoom aplicado).
         self.frame_no = self.frame_no.saturating_add(1);
-        if self.frame_no == 2 {
-            if let Some((w, h)) = self.pending_win.take() {
-                let z = ctx.zoom_factor();
-                ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w / z, h / z)));
-            }
+        if self.frame_no == 2
+            && let Some((w, h)) = self.pending_win.take()
+        {
+            let z = ctx.zoom_factor();
+            ctx.send_viewport_cmd(egui::ViewportCommand::InnerSize(egui::vec2(w / z, h / z)));
         }
 
         // Ctrl + roda do rato: aumenta/diminui toda a interface (texto incluído).
